@@ -5,10 +5,19 @@ core=${1:?usage: verify-core.sh <libmihomocore.so> [abi]}
 abi=${2:-}
 
 test -s "$core"
-readelf -h "$core" | rg -q 'Type:[[:space:]]+DYN[[:space:]]+\(Shared object file\)'
-readelf -Ws "$core" | rg -q '[[:space:]]MihomoMain$'
+
+match_readelf() {
+  if command -v rg >/dev/null 2>&1; then
+    rg -q "$1"
+  else
+    grep -Eq "$1"
+  fi
+}
+
+readelf -h "$core" | match_readelf 'Type:[[:space:]]+DYN[[:space:]]+\(Shared object file\)'
+readelf -Ws "$core" | match_readelf '[[:space:]]MihomoMain$'
 
 test "$abi" = "arm64-v8a"
-readelf -h "$core" | rg -q 'AArch64'
+readelf -h "$core" | match_readelf 'AArch64'
 
 echo "Verified $core${abi:+ ($abi)}"
