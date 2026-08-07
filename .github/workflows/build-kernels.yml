@@ -1,6 +1,13 @@
 name: Build Kernel Releases
 
 on:
+  push:
+    paths:
+      - ".github/workflows/build-kernels.yml"
+      - ".env.example"
+      - "kernel-builder.json"
+      - "scripts/**"
+      - "patches/**"
   schedule:
     - cron: "0 */4 * * *"
   workflow_dispatch:
