@@ -2,7 +2,7 @@
 
 独立的 mihomo 内核构建仓库。它只发布 `libmihomocore.so`，不发布 APP，也不修改 YumeBox
 主仓库的 release。壳和 Go adapter 来自配置的模板仓库，构建后的内核通过 GitHub Release
-供 APP 下载。
+供 APP 下载。当前版本只构建和发布 `arm64-v8a`，不再生成 32 位 ARM、x86 或 x86_64 产物。
 
 ## 自定义内核
 
@@ -30,7 +30,7 @@ kernel-<channel>-<abi>.so.xz
 kernels.json
 ```
 
-`kernels.json` 包含 ABI、shell ABI、源 commit、显示版本和 SHA-256。APP 下载后必须先校验
+`kernels.json` 包含 ARM64 ABI、shell ABI、源 commit、显示版本和 SHA-256。APP 下载后必须先校验
 SHA-256，再写入临时文件并原子替换；失败时继续使用当前内核或恢复内置内核。
 
 当前 workflow 支持每日构建、手动构建和 `repository_dispatch` 的 `kernel-update` 事件。上游

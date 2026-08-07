@@ -1,10 +1,11 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "required": ["schemaVersion", "shellAbi", "releaseTag", "generatedAt", "kernels"],
+  "required": ["schemaVersion", "shellAbi", "abis", "releaseTag", "generatedAt", "kernels"],
   "properties": {
     "schemaVersion": { "const": 1 },
     "shellAbi": { "type": "integer", "minimum": 1 },
+    "abis": { "const": ["arm64-v8a"] },
     "releaseTag": { "type": "string", "minLength": 1 },
     "generatedAt": { "type": "string", "minLength": 1 },
     "kernels": {

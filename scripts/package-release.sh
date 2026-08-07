@@ -17,6 +17,7 @@ for core in "${cores[@]}"; do
   channel=${relative%%/*}
   rest=${relative#*/}
   abi=${rest%%/*}
+  test "$abi" = "arm64-v8a"
   properties=${core%/*}/core-version.properties
   label=$(jq -r --arg id "$channel" '.channels[] | select(.id == $id) | .label' kernel-builder.json)
   commit=$(awk -F= '$1 == "core.commit" { print $2 }' "$properties")
@@ -40,10 +41,11 @@ test "$(jq 'length' <<<"$entries")" -gt 0
 jq -n \
   --argjson schemaVersion 1 \
   --argjson shellAbi "$(jq '.shellAbi' kernel-builder.json)" \
+  --argjson abis "$(jq '.abis' kernel-builder.json)" \
   --arg releaseTag "$release_tag" \
   --arg generatedAt "$generated_at" \
   --argjson kernels "$entries" \
-  '{schemaVersion: $schemaVersion, shellAbi: $shellAbi, releaseTag: $releaseTag, generatedAt: $generatedAt, kernels: $kernels}' \
+  '{schemaVersion: $schemaVersion, shellAbi: $shellAbi, abis: $abis, releaseTag: $releaseTag, generatedAt: $generatedAt, kernels: $kernels}' \
   > "$manifest"
 
 jq empty "$manifest"
