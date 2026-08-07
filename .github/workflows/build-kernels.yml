@@ -57,11 +57,6 @@ on:
         required: false
         type: string
         default: ""
-      release_tag:
-        description: "Release tag to update (blank: .env)"
-        required: false
-        type: string
-        default: ""
   repository_dispatch:
     types: [kernel-update]
 
@@ -86,7 +81,6 @@ jobs:
       INPUT_ANDROID_NDK_VERSION: ${{ inputs.android_ndk_version }}
       INPUT_ANDROID_MIN_SDK: ${{ inputs.android_min_sdk }}
       INPUT_JAVA_VERSION: ${{ inputs.java_version }}
-      INPUT_RELEASE_TAG: ${{ inputs.release_tag }}
     outputs:
       matrix: ${{ steps.config.outputs.matrix }}
       template_repository: ${{ steps.config.outputs.template_repository }}
@@ -129,7 +123,7 @@ jobs:
           ANDROID_NDK_VERSION="${INPUT_ANDROID_NDK_VERSION:-$ANDROID_NDK_VERSION}"
           ANDROID_MIN_SDK="${INPUT_ANDROID_MIN_SDK:-$ANDROID_MIN_SDK}"
           JAVA_VERSION="${INPUT_JAVA_VERSION:-$JAVA_VERSION}"
-          RELEASE_TAG="${INPUT_RELEASE_TAG:-$RELEASE_TAG}"
+          [[ "$RELEASE_TAG" == "kernel" ]]
 
           [[ "$TEMPLATE_REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]
           [[ -n "$TEMPLATE_REF" && -n "$GO_VERSION" && -n "$JAVA_VERSION" ]]
@@ -459,13 +453,7 @@ jobs:
           done < <(jq -r '.channels[].id' kernel-builder.json)
           scripts/package-release.sh normalized-artifacts release-assets "$release_tag" "$generated_at" "$GITHUB_REPOSITORY" "$TEMPLATE_REPOSITORY" "$TEMPLATE_REF" "$GO_VERSION" "$ANDROID_NDK_VERSION"
           scripts/verify-release.sh release-assets
-          {
-            printf '# YumeBox Kernel Release\n\n'
-            printf 'Only arm64-v8a shared cores are published. Verify kernel-index.json.sha256, then verify the selected asset SHA-256 before installing it.\n\n'
-            printf 'Updated at: %s UTC\n\n' "$(jq -r '.generatedAt' release-assets/kernel-index.json)"
-            printf '## Kernels\n\n'
-            jq -r '.kernels[] | "- **\\(.name)** (`\\(.id)`): `\\(.version)` (`\\(.commit[0:7])`)"' release-assets/kernel-index.json
-          } > release-assets/RELEASE_NOTES.md
+          jq -r '.generatedAt' release-assets/kernel-index.json > release-assets/RELEASE_NOTES.md
           printf 'release_tag=%s\n' "$release_tag" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v7
@@ -495,8 +483,5 @@ jobs:
           overwrite_files: true
           files: |
             release-assets/*.so.xz
-            release-assets/*.so.xz.sha256
-            release-assets/kernel-checksums.txt
             release-assets/kernel-index.json
-            release-assets/kernel-index.json.sha256
           fail_on_unmatched_files: true

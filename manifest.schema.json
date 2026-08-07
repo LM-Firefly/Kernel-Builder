@@ -48,7 +48,7 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "name", "version", "commit", "abi", "shellAbi", "asset", "downloadUrl", "checksumUrl", "sha256", "sizeBytes", "compression", "sourceRepository", "sourceRef", "sourceCommit", "templateCommit"],
+        "required": ["id", "name", "version", "commit", "abi", "shellAbi", "asset", "downloadUrl", "sha256", "sizeBytes", "compression", "sourceRepository", "sourceRef", "sourceCommit", "templateCommit"],
         "properties": {
           "id": { "enum": ["alpha", "meta", "smart"] },
           "name": { "type": "string", "minLength": 1 },
@@ -58,7 +58,6 @@
           "shellAbi": { "type": "integer", "minimum": 1 },
           "asset": { "type": "string", "pattern": "^kernel-(alpha|meta|smart)\\.so\\.xz$" },
           "downloadUrl": { "type": "string", "format": "uri" },
-          "checksumUrl": { "type": "string", "format": "uri" },
           "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
           "sizeBytes": { "type": "integer", "minimum": 1 },
           "compression": { "const": "xz" },

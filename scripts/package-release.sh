@@ -44,10 +44,8 @@ for core in "${cores[@]}"; do
   asset="kernel-${channel}.so.xz"
   xz -"$compression_level"e -c "$core" > "$output/$asset"
   sha=$(sha256sum "$output/$asset" | awk '{ print $1 }')
-  printf '%s  %s\n' "$sha" "$asset" > "$output/$asset.sha256"
   size_bytes=$(stat -c '%s' "$output/$asset")
   download_url="https://github.com/${release_repository}/releases/download/${release_tag}/${asset}"
-  checksum_url="${download_url}.sha256"
   entries=$(jq -c \
     --arg id "$channel" \
     --arg name "$name" \
@@ -62,9 +60,8 @@ for core in "${cores[@]}"; do
     --arg sourceCommit "$source_commit" \
     --arg templateCommit "$template_commit" \
     --arg downloadUrl "$download_url" \
-    --arg checksumUrl "$checksum_url" \
     --argjson sizeBytes "$size_bytes" \
-    '. + [{id: $id, name: $name, version: $version, commit: $commit, abi: $abi, shellAbi: $shellAbi, asset: $asset, downloadUrl: $downloadUrl, checksumUrl: $checksumUrl, sha256: $sha256, sizeBytes: $sizeBytes, compression: "xz", sourceRepository: $repository, sourceRef: $ref, sourceCommit: $sourceCommit, templateCommit: $templateCommit}]' \
+    '. + [{id: $id, name: $name, version: $version, commit: $commit, abi: $abi, shellAbi: $shellAbi, asset: $asset, downloadUrl: $downloadUrl, sha256: $sha256, sizeBytes: $sizeBytes, compression: "xz", sourceRepository: $repository, sourceRef: $ref, sourceCommit: $sourceCommit, templateCommit: $templateCommit}]' \
     <<<"$entries")
 done
 
@@ -88,9 +85,6 @@ jq -n \
 jq empty "$manifest"
 (
   cd "$output"
-  for file in *.so.xz kernel-index.json; do
-    sha256sum "$file"
-  done > kernel-checksums.txt
-  sha256sum kernel-index.json > kernel-index.json.sha256
+  test -f kernel-index.json
 )
 echo "Packaged $(jq '.kernels | length' "$manifest") kernel assets in $output"
