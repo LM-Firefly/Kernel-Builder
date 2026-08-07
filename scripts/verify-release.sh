@@ -9,14 +9,22 @@ test -f "$manifest"
 test -f "$checksums"
 jq empty "$manifest"
 jq -e '
-  .schemaVersion == 2 and
+  .schemaVersion == 3 and
+  .defaultKernel == "alpha" and
   .abi == "arm64-v8a" and
+  (([.kernels[].id] | sort) == ["alpha", "meta", "smart"]) and
   (.kernels | type == "array" and length > 0) and
   all(.kernels[];
+    (.id | type == "string" and length > 0) and
+    (.name | type == "string" and length > 0) and
     .abi == "arm64-v8a" and
     (.asset | endswith(".so.xz")) and
     (.sha256 | test("^[0-9a-f]{64}$")) and
-    (.downloadUrl | startswith("https://"))
+    (.downloadUrl | startswith("https://")) and
+    (.checksumUrl | startswith("https://")) and
+    (.sizeBytes | type == "number" and . > 0) and
+    (.sourceCommit | test("^[0-9a-f]{40}$")) and
+    (.templateCommit | test("^[0-9a-f]{40}$"))
   )
 ' "$manifest" >/dev/null
 

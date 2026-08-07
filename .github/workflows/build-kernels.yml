@@ -4,11 +4,6 @@ on:
   schedule:
     - cron: "0 18 * * *"
   workflow_dispatch:
-    inputs:
-      channel:
-        description: "Optional channel id; empty builds every configured channel"
-        required: false
-        type: string
   repository_dispatch:
     types: [kernel-update]
 
@@ -54,19 +49,11 @@ jobs:
       - id: config
         name: Parse .env and builder configuration
         shell: bash
-        env:
-          REQUESTED_CHANNEL: ${{ inputs.channel || github.event.client_payload.channel || '' }}
         run: |
           set -euo pipefail
           source scripts/load-env.sh .env
           scripts/validate-config.sh .env kernel-builder.json
-
-          if [ -n "$REQUESTED_CHANNEL" ]; then
-            matrix=$(jq -ce --arg id "$REQUESTED_CHANNEL" '[.channels[] | select(.id == $id)]' kernel-builder.json)
-            test "$(jq length <<<"$matrix")" -eq 1
-          else
-            matrix=$(jq -ce '.channels' kernel-builder.json)
-          fi
+          matrix=$(jq -ce '.channels' kernel-builder.json)
 
           {
             printf 'matrix=%s\n' "$matrix"
@@ -292,7 +279,7 @@ jobs:
             printf '# YumeBox Kernel Release\n\n'
             printf 'Only arm64-v8a shared cores are published. Verify kernels.json.sha256, then verify the selected asset SHA-256 before installing it.\n\n'
             printf '## Kernels\n\n'
-            jq -r '.kernels[] | "- **\\(.label)**: `\\(.version)` (`\\(.commit[0:7])`)"' release-assets/kernels.json
+            jq -r '.kernels[] | "- **\\(.name)** (`\\(.id)`): `\\(.version)` (`\\(.commit[0:7])`)"' release-assets/kernels.json
           } > release-assets/RELEASE_NOTES.md
           printf 'release_tag=%s\n' "$release_tag" >> "$GITHUB_OUTPUT"
 

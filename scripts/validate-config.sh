@@ -55,10 +55,10 @@ jq -e '
   (.shellAbi | type == "number" and . >= 1) and
   .abis == ["arm64-v8a"] and
   (.channels | type == "array" and length > 0) and
-  (([.channels[].id] | unique | length) == ([.channels[].id] | length)) and
+  (([.channels[].id] | sort) == ["alpha", "meta", "smart"]) and
   all(.channels[];
     (.id | test("^[a-z0-9][a-z0-9-]*$")) and
-    (.label | type == "string" and length > 0) and
+    (.name | type == "string" and length > 0) and
     (.repository | type == "string" and test("^(https://|git@).+")) and
     (.ref | type == "string" and length > 0) and
     (.suffix | type == "string") and

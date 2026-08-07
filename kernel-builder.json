@@ -8,16 +8,8 @@
   },
   "channels": [
     {
-      "id": "stable",
-      "label": "Stable",
-      "repository": "https://github.com/MetaCubeX/mihomo.git",
-      "ref": "v1.19.29",
-      "suffix": "-Stable",
-      "patches": "patches/stable"
-    },
-    {
       "id": "alpha",
-      "label": "Alpha",
+      "name": "Mihomo Alpha",
       "repository": "https://github.com/MetaCubeX/mihomo.git",
       "ref": "Alpha",
       "suffix": "",
@@ -25,7 +17,7 @@
     },
     {
       "id": "meta",
-      "label": "Meta",
+      "name": "Mihomo Meta",
       "repository": "https://github.com/MetaCubeX/mihomo.git",
       "ref": "Meta",
       "suffix": "",
@@ -33,7 +25,7 @@
     },
     {
       "id": "smart",
-      "label": "Smart",
+      "name": "Mihomo Smart",
       "repository": "https://github.com/vernesong/mihomo.git",
       "ref": "Alpha",
       "suffix": "-Smart",

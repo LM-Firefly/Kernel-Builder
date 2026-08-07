@@ -15,7 +15,7 @@ compression_level=${XZ_COMPRESSION_LEVEL:-9}
 mkdir -p "$output"
 manifest="$output/kernels.json"
 entries='[]'
-checksums="$output/checksums.txt"
+shell_abi=$(jq -r '.shellAbi' kernel-builder.json)
 
 shopt -s nullglob
 cores=("$root"/*/*/libmihomocore.so)
@@ -29,7 +29,7 @@ for core in "${cores[@]}"; do
   source_metadata=${core%/*}/source.json
   test -f "$properties"
   test -f "$source_metadata"
-  label=$(jq -r --arg id "$channel" '.channels[] | select(.id == $id) | .label' kernel-builder.json)
+  name=$(jq -r --arg id "$channel" '.channels[] | select(.id == $id) | .name' kernel-builder.json)
   commit=$(awk -F= '$1 == "core.commit" { print $2 }' "$properties")
   version=$(awk -F= '$1 == "core.displayVersion" { print $2 }' "$properties")
   [[ "$commit" =~ ^[0-9a-f]{40}$ ]]
@@ -42,11 +42,14 @@ for core in "${cores[@]}"; do
   xz -"$compression_level"e -c "$core" > "$output/$asset"
   sha=$(sha256sum "$output/$asset" | awk '{ print $1 }')
   printf '%s  %s\n' "$sha" "$asset" > "$output/$asset.sha256"
+  size_bytes=$(stat -c '%s' "$output/$asset")
   download_url="https://github.com/${release_repository}/releases/download/${release_tag}/${asset}"
+  checksum_url="${download_url}.sha256"
   entries=$(jq -c \
-    --arg channel "$channel" \
-    --arg label "$label" \
+    --arg id "$channel" \
+    --arg name "$name" \
     --arg abi "$abi" \
+    --argjson shellAbi "$shell_abi" \
     --arg asset "$asset" \
     --arg sha256 "$sha" \
     --arg commit "$commit" \
@@ -56,17 +59,19 @@ for core in "${cores[@]}"; do
     --arg sourceCommit "$source_commit" \
     --arg templateCommit "$template_commit" \
     --arg downloadUrl "$download_url" \
-    '. + [{channel: $channel, label: $label, abi: $abi, asset: $asset, sha256: $sha256, commit: $commit, version: $version, repository: $repository, ref: $ref, sourceCommit: $sourceCommit, templateCommit: $templateCommit, downloadUrl: $downloadUrl, compression: "xz"}]' \
+    --arg checksumUrl "$checksum_url" \
+    --argjson sizeBytes "$size_bytes" \
+    '. + [{id: $id, name: $name, version: $version, commit: $commit, abi: $abi, shellAbi: $shellAbi, asset: $asset, downloadUrl: $downloadUrl, checksumUrl: $checksumUrl, sha256: $sha256, sizeBytes: $sizeBytes, compression: "xz", sourceRepository: $repository, sourceRef: $ref, sourceCommit: $sourceCommit, templateCommit: $templateCommit}]' \
     <<<"$entries")
 done
 
 test "$(jq 'length' <<<"$entries")" -gt 0
 jq -n \
-  --argjson schemaVersion 2 \
-  --argjson shellAbi "$(jq '.shellAbi' kernel-builder.json)" \
+  --argjson shellAbi "$shell_abi" \
   --arg abi "arm64-v8a" \
   --arg releaseTag "$release_tag" \
   --arg releaseUrl "https://github.com/${release_repository}/releases/tag/${release_tag}" \
+  --arg manifestUrl "https://github.com/${release_repository}/releases/download/${release_tag}/kernels.json" \
   --arg generatedAt "$generated_at" \
   --arg templateRepository "$template_repository" \
   --arg templateRef "$template_ref" \
@@ -74,7 +79,7 @@ jq -n \
   --arg ndkVersion "$ndk_version" \
   --argjson compressionLevel "$compression_level" \
   --argjson kernels "$entries" \
-  '{schemaVersion: $schemaVersion, shellAbi: $shellAbi, abi: $abi, releaseTag: $releaseTag, releaseUrl: $releaseUrl, generatedAt: $generatedAt, template: {repository: $templateRepository, ref: $templateRef}, toolchain: {go: $goVersion, ndk: $ndkVersion, compression: "xz", compressionLevel: $compressionLevel}, kernels: $kernels}' \
+  '{schemaVersion: 3, generatedAt: $generatedAt, release: {tag: $releaseTag, url: $releaseUrl, manifestUrl: $manifestUrl}, defaultKernel: "alpha", abi: $abi, shellAbi: $shellAbi, template: {repository: $templateRepository, ref: $templateRef}, toolchain: {go: $goVersion, ndk: $ndkVersion, compression: "xz", compressionLevel: $compressionLevel}, kernels: $kernels}' \
   > "$manifest"
 
 jq empty "$manifest"

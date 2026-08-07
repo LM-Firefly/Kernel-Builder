@@ -13,18 +13,17 @@ YumeBox 主仓库的 release。固定壳和 Go adapter 来自 `.env` 指定的�
 - `TEMPLATE_REPOSITORY_TOKEN`：读取私有壳/adapter 模板。
 - `KERNEL_REPOSITORY_TOKEN`：读取私有内核源仓库。
 
-`kernel-builder.json` 的 `channels[]` 可完全替换为自己的内核地址、ref、后缀和 patch 目录。
+`kernel-builder.json` 固定包含三个渠道：`alpha`、`meta`、`smart`。可以修改它们的仓库地址、
+ref、后缀和 patch 目录，但不要改变 `id`，这样 APP 的列表解析和回退逻辑保持稳定。
 工作流支持定时构建、手动构建，以及上游通过 `repository_dispatch` 发送 `kernel-update`。
 
 ## 工作流阶段
 
-1. `validate-config` 解析 `.env`，校验 JSON、patch 目录、工具链和唯一渠道，并生成矩阵。
+1. `validate-config` 解析 `.env`，校验 JSON、三个渠道、patch 目录、工具链，并生成矩阵。
 2. `build-core` 为每个渠道独立 checkout 壳与内核，应用 patch，只构建 ARM64。
 3. `verify-core` 用 `file`/`readelf` 校验 ELF、架构和 `MihomoMain` 导出，并锁定源 commit。
 4. `package-release` 压缩 `.so`，生成 sidecar SHA-256、`checksums.txt`、`kernels.json` 和校验报告。
 5. `publish-release` 只在全部渠道成功后更新固定的 GitHub prerelease。
-
-## Release 资产
 
 ## 固定 Release 合约
 
@@ -39,15 +38,13 @@ YumeBox 主仓库的 release。固定壳和 Go adapter 来自 `.env` 指定的�
 | 支持 ABI | `arm64-v8a` |
 
 固定资产名会被覆盖，不会在同一 Release 中残留旧 commit 文件；实际源版本始终记录在
-`kernels.json`。如果需要历史版本，应在 APP 侧保存 manifest，或复制 Release 后再归档。
+`kernels.json`。APP 不需要从资产文件名反向解析渠道，直接读取 `kernels[]` 的 `id` 和 `name`。
 
 ## 最终 Release 资产
 
 最终 Release 只上传这些文件（内部 Actions Artifact 不会出现在 Release 页面）：
 
 ```text
-libmihomocore-stable-arm64-v8a.so.xz
-libmihomocore-stable-arm64-v8a.so.xz.sha256
 libmihomocore-alpha-arm64-v8a.so.xz
 libmihomocore-alpha-arm64-v8a.so.xz.sha256
 libmihomocore-meta-arm64-v8a.so.xz
@@ -60,10 +57,25 @@ kernels.json.sha256
 ```
 
 压缩使用 `xz -9e`，即 LZMA2 极限压缩；Release 页面提供 `checksums.txt`，每个压缩库和
-`kernels.json` 还有独立的 SHA-256 文件。`kernels.json` 使用 schema version 2，包含 shell ABI、
-源仓库/ref/commit、模板 commit、压缩格式、工具链、下载 URL 和 SHA-256。APP 必须先校验
+`kernels.json` 还有独立的 SHA-256 文件。`kernels.json` 使用 schema version 3，`kernels[]` 是
+固定的 `alpha`、`meta`、`smart` 列表，每项直接提供 `id`、`name`、`version`、`asset`、
+`downloadUrl`、`checksumUrl`、`sha256`、ABI 和源 commit。APP 必须先校验
 manifest，再校验目标 `.so.xz`，解压后验证 ARM64 ELF 和 `MihomoMain`，最后写入临时文件并
 原子替换；失败时保留当前内核或回退到内置内核。
+
+APP 只需读取 `kernels` 数组，不需要解析资产文件名：
+
+```json
+{
+  "id": "alpha",
+  "name": "Mihomo Alpha",
+  "version": "v1.19.29",
+  "asset": "libmihomocore-alpha-arm64-v8a.so.xz",
+  "downloadUrl": "https://github.com/owner/repo/releases/download/yumebox-kernels-arm64/libmihomocore-alpha-arm64-v8a.so.xz",
+  "checksumUrl": "https://github.com/owner/repo/releases/download/yumebox-kernels-arm64/libmihomocore-alpha-arm64-v8a.so.xz.sha256",
+  "sha256": "..."
+}
+```
 
 ## Actions Artifact 与 Release 的区别
 

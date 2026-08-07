@@ -1,14 +1,22 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "required": ["schemaVersion", "shellAbi", "abi", "releaseTag", "releaseUrl", "generatedAt", "template", "toolchain", "kernels"],
+  "required": ["schemaVersion", "generatedAt", "release", "defaultKernel", "abi", "shellAbi", "template", "toolchain", "kernels"],
   "properties": {
-    "schemaVersion": { "const": 2 },
+    "schemaVersion": { "const": 3 },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "release": {
+      "type": "object",
+      "required": ["tag", "url", "manifestUrl"],
+      "properties": {
+        "tag": { "type": "string", "minLength": 1 },
+        "url": { "type": "string", "format": "uri" },
+        "manifestUrl": { "type": "string", "format": "uri" }
+      }
+    },
+    "defaultKernel": { "const": "alpha" },
     "shellAbi": { "type": "integer", "minimum": 1 },
     "abi": { "const": "arm64-v8a" },
-    "releaseTag": { "type": "string", "minLength": 1 },
-    "releaseUrl": { "type": "string", "format": "uri" },
-    "generatedAt": { "type": "string", "minLength": 1 },
     "template": {
       "type": "object",
       "required": ["repository", "ref"],
@@ -31,21 +39,24 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["channel", "label", "abi", "asset", "sha256", "commit", "version", "repository", "ref", "sourceCommit", "templateCommit", "downloadUrl", "compression"],
+        "required": ["id", "name", "version", "commit", "abi", "shellAbi", "asset", "downloadUrl", "checksumUrl", "sha256", "sizeBytes", "compression", "sourceRepository", "sourceRef", "sourceCommit", "templateCommit"],
         "properties": {
-          "channel": { "type": "string", "minLength": 1 },
-          "label": { "type": "string", "minLength": 1 },
-          "abi": { "type": "string", "minLength": 1 },
-          "asset": { "type": "string", "pattern": "^libmihomocore-[a-z0-9-]+-arm64-v8a\\.so\\.xz$" },
-          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-          "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+          "id": { "enum": ["alpha", "meta", "smart"] },
+          "name": { "type": "string", "minLength": 1 },
           "version": { "type": "string", "minLength": 1 },
-          "repository": { "type": "string", "minLength": 1 },
-          "ref": { "type": "string", "minLength": 1 },
-          "sourceCommit": { "type": "string", "minLength": 7 },
-          "templateCommit": { "type": "string", "minLength": 7 },
+          "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+          "abi": { "const": "arm64-v8a" },
+          "shellAbi": { "type": "integer", "minimum": 1 },
+          "asset": { "type": "string", "pattern": "^libmihomocore-[a-z0-9-]+-arm64-v8a\\.so\\.xz$" },
           "downloadUrl": { "type": "string", "format": "uri" },
-          "compression": { "const": "xz" }
+          "checksumUrl": { "type": "string", "format": "uri" },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "sizeBytes": { "type": "integer", "minimum": 1 },
+          "compression": { "const": "xz" },
+          "sourceRepository": { "type": "string", "minLength": 1 },
+          "sourceRef": { "type": "string", "minLength": 1 },
+          "sourceCommit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+          "templateCommit": { "type": "string", "pattern": "^[0-9a-f]{40}$" }
         }
       }
     }
