@@ -1,12 +1,15 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "YumeBox Kernel Index",
   "type": "object",
+  "additionalProperties": false,
   "required": ["schemaVersion", "generatedAt", "release", "defaultKernel", "abi", "shellAbi", "template", "toolchain", "kernels"],
   "properties": {
     "schemaVersion": { "const": 3 },
     "generatedAt": { "type": "string", "format": "date-time" },
     "release": {
       "type": "object",
+      "additionalProperties": false,
       "required": ["tag", "url", "manifestUrl"],
       "properties": {
         "tag": { "type": "string", "minLength": 1 },
@@ -19,6 +22,7 @@
     "abi": { "const": "arm64-v8a" },
     "template": {
       "type": "object",
+      "additionalProperties": false,
       "required": ["repository", "ref"],
       "properties": {
         "repository": { "type": "string", "minLength": 1 },
@@ -27,6 +31,7 @@
     },
     "toolchain": {
       "type": "object",
+      "additionalProperties": false,
       "required": ["go", "ndk", "compression", "compressionLevel"],
       "properties": {
         "go": { "type": "string", "minLength": 1 },
@@ -37,8 +42,12 @@
     },
     "kernels": {
       "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "uniqueItems": true,
       "items": {
         "type": "object",
+        "additionalProperties": false,
         "required": ["id", "name", "version", "commit", "abi", "shellAbi", "asset", "downloadUrl", "checksumUrl", "sha256", "sizeBytes", "compression", "sourceRepository", "sourceRef", "sourceCommit", "templateCommit"],
         "properties": {
           "id": { "enum": ["alpha", "meta", "smart"] },
@@ -47,7 +56,7 @@
           "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
           "abi": { "const": "arm64-v8a" },
           "shellAbi": { "type": "integer", "minimum": 1 },
-          "asset": { "type": "string", "pattern": "^yumebox-kernel-(alpha|meta|smart)-android-arm64-v8a\\.so\\.xz$" },
+          "asset": { "type": "string", "pattern": "^kernel-(alpha|meta|smart)\\.so\\.xz$" },
           "downloadUrl": { "type": "string", "format": "uri" },
           "checksumUrl": { "type": "string", "format": "uri" },
           "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },

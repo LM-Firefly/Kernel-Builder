@@ -37,7 +37,7 @@ Release Notes 时间，即使版本未变化也会留下本次检查时间。
 | Name | `Build Kernel` |
 | 类型 | prerelease，且不标记为 latest |
 | JSON 稳定地址 | `https://github.com/<owner>/<repo>/releases/download/kernel/kernel-index.json` |
-| 支持 ABI | `arm64-v8a` |
+| 支持 ABI | `arm64-v8a`（只写入 JSON，不写入资产文件名） |
 
 固定资产名会被覆盖，不会在同一 Release 中残留旧 commit 文件；实际源版本始终记录在
 `kernel-index.json`。APP 不需要从资产文件名反向解析渠道，直接读取 `kernels[]` 的 `id` 和 `name`。
@@ -47,12 +47,12 @@ Release Notes 时间，即使版本未变化也会留下本次检查时间。
 最终 Release 只上传这些文件（内部 Actions Artifact 不会出现在 Release 页面）：
 
 ```text
-yumebox-kernel-alpha-android-arm64-v8a.so.xz
-yumebox-kernel-alpha-android-arm64-v8a.so.xz.sha256
-yumebox-kernel-meta-android-arm64-v8a.so.xz
-yumebox-kernel-meta-android-arm64-v8a.so.xz.sha256
-yumebox-kernel-smart-android-arm64-v8a.so.xz
-yumebox-kernel-smart-android-arm64-v8a.so.xz.sha256
+kernel-alpha.so.xz
+kernel-alpha.so.xz.sha256
+kernel-meta.so.xz
+kernel-meta.so.xz.sha256
+kernel-smart.so.xz
+kernel-smart.so.xz.sha256
 kernel-checksums.txt
 kernel-index.json
 kernel-index.json.sha256
@@ -72,12 +72,22 @@ APP 只需读取 `kernels` 数组，不需要解析资产文件名：
   "id": "alpha",
   "name": "Mihomo Alpha",
   "version": "v1.19.29",
-  "asset": "yumebox-kernel-alpha-android-arm64-v8a.so.xz",
-  "downloadUrl": "https://github.com/owner/repo/releases/download/kernel/yumebox-kernel-alpha-android-arm64-v8a.so.xz",
-  "checksumUrl": "https://github.com/owner/repo/releases/download/kernel/yumebox-kernel-alpha-android-arm64-v8a.so.xz.sha256",
+  "asset": "kernel-alpha.so.xz",
+  "downloadUrl": "https://github.com/owner/repo/releases/download/kernel/kernel-alpha.so.xz",
+  "checksumUrl": "https://github.com/owner/repo/releases/download/kernel/kernel-alpha.so.xz.sha256",
   "sha256": "..."
 }
 ```
+
+### JSON 解析规范
+
+1. 先校验 `schemaVersion == 3`、`abi == "arm64-v8a"`、`shellAbi` 和 `release.manifestUrl`。
+2. 将 `kernels` 当作固定列表，必须恰好包含 `alpha`、`meta`、`smart` 三项；用 `id` 作为唯一键，
+   用 `name` 作为显示文本，推荐显示顺序为 Alpha、Meta、Smart。
+3. 下载时只使用该项的 `downloadUrl` 和 `checksumUrl`，不要拼接或解析 `asset` 文件名。
+4. 先校验 SHA-256，再解压 XZ；解压结果必须是 `arm64-v8a` ELF，并导出 `MihomoMain`。
+5. 缺字段、未知 `schemaVersion`、重复/缺失 id、哈希失败或 ABI 不匹配时，保留当前内核；`defaultKernel`
+   只在 Alpha 可用时生效。
 
 ## Actions Artifact 与 Release 的区别
 

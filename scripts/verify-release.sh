@@ -30,6 +30,10 @@ jq -e '
 
 while IFS=$'\t' read -r asset sha; do
   test -n "$asset"
+  case "$asset" in
+    kernel-alpha.so.xz | kernel-meta.so.xz | kernel-smart.so.xz) ;;
+    *) echo "Unexpected kernel asset name: $asset" >&2; exit 1 ;;
+  esac
   test -f "$release_dir/$asset"
   actual=$(sha256sum "$release_dir/$asset" | awk '{ print $1 }')
   test "$actual" = "$sha"
