@@ -305,16 +305,6 @@ jobs:
           mkdir -p app-template/.github/patches/mihomo
           cp -a "$PATCH_DIRECTORY"/. app-template/.github/patches/mihomo/
 
-      - name: Synchronize Go module graph with selected kernel
-        working-directory: app-template
-        run: |
-          set -euo pipefail
-          # The YumeBox template is intentionally fixed, while the selected kernel can move
-          # independently. Tidy both modules after checkout so indirect dependencies from the
-          # kernel (including jls-quic-go) are not pinned to the template's older graph.
-          go mod tidy -C lib/mihomo
-          go mod tidy -C lib/native/go
-
       - name: Build ARM64 core through the fixed shell adapter
         working-directory: app-template
         env:
