@@ -13,7 +13,7 @@ ndk_version=${9:?usage: package-release.sh <artifact-root> <output-dir> <release
 compression_level=${XZ_COMPRESSION_LEVEL:-9}
 
 mkdir -p "$output"
-manifest="$output/kernels.json"
+manifest="$output/kernel-index.json"
 entries='[]'
 shell_abi=$(jq -r '.shellAbi' kernel-builder.json)
 
@@ -38,7 +38,7 @@ for core in "${cores[@]}"; do
   source_ref=$(jq -r '.ref' "$source_metadata")
   source_commit=$(jq -r '.commit' "$source_metadata")
   template_commit=$(jq -r '.templateCommit' "$source_metadata")
-  asset="libmihomocore-${channel}-${abi}.so.xz"
+  asset="yumebox-kernel-${channel}-android-${abi}.so.xz"
   xz -"$compression_level"e -c "$core" > "$output/$asset"
   sha=$(sha256sum "$output/$asset" | awk '{ print $1 }')
   printf '%s  %s\n' "$sha" "$asset" > "$output/$asset.sha256"
@@ -71,7 +71,7 @@ jq -n \
   --arg abi "arm64-v8a" \
   --arg releaseTag "$release_tag" \
   --arg releaseUrl "https://github.com/${release_repository}/releases/tag/${release_tag}" \
-  --arg manifestUrl "https://github.com/${release_repository}/releases/download/${release_tag}/kernels.json" \
+  --arg manifestUrl "https://github.com/${release_repository}/releases/download/${release_tag}/kernel-index.json" \
   --arg generatedAt "$generated_at" \
   --arg templateRepository "$template_repository" \
   --arg templateRef "$template_ref" \
@@ -85,9 +85,9 @@ jq -n \
 jq empty "$manifest"
 (
   cd "$output"
-  for file in *.so.xz kernels.json; do
+  for file in *.so.xz kernel-index.json; do
     sha256sum "$file"
-  done > checksums.txt
-  sha256sum kernels.json > kernels.json.sha256
+  done > kernel-checksums.txt
+  sha256sum kernel-index.json > kernel-index.json.sha256
 )
 echo "Packaged $(jq '.kernels | length' "$manifest") kernel assets in $output"

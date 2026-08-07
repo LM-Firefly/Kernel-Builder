@@ -2,8 +2,8 @@
 set -euo pipefail
 
 release_dir=${1:?usage: verify-release.sh <release-dir>}
-manifest="$release_dir/kernels.json"
-checksums="$release_dir/checksums.txt"
+manifest="$release_dir/kernel-index.json"
+checksums="$release_dir/kernel-checksums.txt"
 
 test -f "$manifest"
 test -f "$checksums"
@@ -43,7 +43,7 @@ done < <(jq -r '.kernels[] | [.asset, .sha256] | @tsv' "$manifest")
 
 (
   cd "$release_dir"
-  sha256sum --check --status checksums.txt
-  sha256sum --check --status kernels.json.sha256
+  sha256sum --check --status kernel-checksums.txt
+  sha256sum --check --status kernel-index.json.sha256
 )
 echo "Verified release assets in $release_dir"

@@ -47,7 +47,7 @@
           "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
           "abi": { "const": "arm64-v8a" },
           "shellAbi": { "type": "integer", "minimum": 1 },
-          "asset": { "type": "string", "pattern": "^libmihomocore-[a-z0-9-]+-arm64-v8a\\.so\\.xz$" },
+          "asset": { "type": "string", "pattern": "^yumebox-kernel-(alpha|meta|smart)-android-arm64-v8a\\.so\\.xz$" },
           "downloadUrl": { "type": "string", "format": "uri" },
           "checksumUrl": { "type": "string", "format": "uri" },
           "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
