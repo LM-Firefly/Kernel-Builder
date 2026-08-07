@@ -38,8 +38,7 @@ for core in "${cores[@]}"; do
   source_ref=$(jq -r '.ref' "$source_metadata")
   source_commit=$(jq -r '.commit' "$source_metadata")
   template_commit=$(jq -r '.templateCommit' "$source_metadata")
-  short_commit=${commit:0:7}
-  asset="libmihomocore-${channel}-${abi}-${short_commit}.so.xz"
+  asset="libmihomocore-${channel}-${abi}.so.xz"
   xz -"$compression_level"e -c "$core" > "$output/$asset"
   sha=$(sha256sum "$output/$asset" | awk '{ print $1 }')
   printf '%s  %s\n' "$sha" "$asset" > "$output/$asset.sha256"

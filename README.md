@@ -22,25 +22,57 @@ YumeBox 主仓库的 release。固定壳和 Go adapter 来自 `.env` 指定的�
 2. `build-core` 为每个渠道独立 checkout 壳与内核，应用 patch，只构建 ARM64。
 3. `verify-core` 用 `file`/`readelf` 校验 ELF、架构和 `MihomoMain` 导出，并锁定源 commit。
 4. `package-release` 压缩 `.so`，生成 sidecar SHA-256、`checksums.txt`、`kernels.json` 和校验报告。
-5. `publish-release` 只在全部渠道成功后创建 GitHub prerelease。
+5. `publish-release` 只在全部渠道成功后更新固定的 GitHub prerelease。
 
 ## Release 资产
 
-每次运行创建不可变的 `yumebox-kernel-<run-id>-<attempt>` release，资产类似：
+## 固定 Release 合约
+
+工作流不会为每次运行创建新的 Release。它始终更新以下固定 Release：
+
+| 字段 | 值 |
+| --- | --- |
+| Tag | `yumebox-kernels-arm64` |
+| Name | `YumeBox Kernels (arm64-v8a)` |
+| 类型 | prerelease，且不标记为 latest |
+| JSON 稳定地址 | `https://github.com/<owner>/<repo>/releases/download/yumebox-kernels-arm64/kernels.json` |
+| 支持 ABI | `arm64-v8a` |
+
+固定资产名会被覆盖，不会在同一 Release 中残留旧 commit 文件；实际源版本始终记录在
+`kernels.json`。如果需要历史版本，应在 APP 侧保存 manifest，或复制 Release 后再归档。
+
+## 最终 Release 资产
+
+最终 Release 只上传这些文件（内部 Actions Artifact 不会出现在 Release 页面）：
 
 ```text
-libmihomocore-alpha-arm64-v8a-1af24e9.so.xz
-libmihomocore-alpha-arm64-v8a-1af24e9.so.xz.sha256
+libmihomocore-stable-arm64-v8a.so.xz
+libmihomocore-stable-arm64-v8a.so.xz.sha256
+libmihomocore-alpha-arm64-v8a.so.xz
+libmihomocore-alpha-arm64-v8a.so.xz.sha256
+libmihomocore-meta-arm64-v8a.so.xz
+libmihomocore-meta-arm64-v8a.so.xz.sha256
+libmihomocore-smart-arm64-v8a.so.xz
+libmihomocore-smart-arm64-v8a.so.xz.sha256
+checksums.txt
 kernels.json
 kernels.json.sha256
-checksums.txt
-RELEASE_NOTES.md
 ```
 
-这与 mihomo Alpha 的 `checksums.txt` 和带短 commit 的资产命名保持同一思路。`kernels.json`
-使用 schema version 2，包含 shell ABI、源仓库/ref/commit、模板 commit、压缩格式、工具链、
-下载 URL 和 SHA-256。APP 必须先通过 manifest 和 SHA-256 校验，再将解压后的 ARM64 ELF
-写入临时文件并原子替换；失败时保留当前内核或回退到内置内核。
+压缩使用 `xz -9e`，即 LZMA2 极限压缩；Release 页面提供 `checksums.txt`，每个压缩库和
+`kernels.json` 还有独立的 SHA-256 文件。`kernels.json` 使用 schema version 2，包含 shell ABI、
+源仓库/ref/commit、模板 commit、压缩格式、工具链、下载 URL 和 SHA-256。APP 必须先校验
+manifest，再校验目标 `.so.xz`，解压后验证 ARM64 ELF 和 `MihomoMain`，最后写入临时文件并
+原子替换；失败时保留当前内核或回退到内置内核。
+
+## Actions Artifact 与 Release 的区别
+
+| 阶段 | Artifact 名称 | 内容 | 保留时间 | 是否对用户发布 |
+| --- | --- | --- | --- | --- |
+| 构建后 | `raw-arm64-<channel>` | 未压缩 `.so`、版本 properties、源 commit JSON | 7 天 | 否 |
+| 验证后 | `verified-arm64-<channel>` | 通过 ELF/入口点验证的同一组文件 | 7 天 | 否 |
+| 打包后 | `release-assets-arm64` | 最终压缩包、校验文件、JSON、Release notes | 14 天 | 否 |
+| 发布后 | 固定 Release `yumebox-kernels-arm64` | 上表“最终 Release 资产” | 由 GitHub 保留 | 是 |
 
 ## 本地检查
 

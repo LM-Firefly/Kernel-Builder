@@ -33,7 +33,8 @@ jobs:
       java_version: ${{ steps.config.outputs.java_version }}
       go_version: ${{ steps.config.outputs.go_version }}
       go_download_base_url: ${{ steps.config.outputs.go_download_base_url }}
-      release_prefix: ${{ steps.config.outputs.release_prefix }}
+      release_tag: ${{ steps.config.outputs.release_tag }}
+      release_name: ${{ steps.config.outputs.release_name }}
       release_prerelease: ${{ steps.config.outputs.release_prerelease }}
       release_make_latest: ${{ steps.config.outputs.release_make_latest }}
       compression_level: ${{ steps.config.outputs.compression_level }}
@@ -77,7 +78,8 @@ jobs:
             printf 'java_version=%s\n' "$JAVA_VERSION"
             printf 'go_version=%s\n' "$GO_VERSION"
             printf 'go_download_base_url=%s\n' "$GO_DOWNLOAD_BASE_URL"
-            printf 'release_prefix=%s\n' "$RELEASE_PREFIX"
+            printf 'release_tag=%s\n' "$RELEASE_TAG"
+            printf 'release_name=%s\n' "$RELEASE_NAME"
             printf 'release_prerelease=%s\n' "$RELEASE_PRERELEASE"
             printf 'release_make_latest=%s\n' "$RELEASE_MAKE_LATEST"
             printf 'compression_level=%s\n' "$COMPRESSION_LEVEL"
@@ -196,7 +198,7 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         with:
-          name: raw-${{ matrix.channel.id }}
+          name: raw-arm64-${{ matrix.channel.id }}
           path: kernel-artifact
           if-no-files-found: error
           retention-days: 7
@@ -214,7 +216,7 @@ jobs:
 
       - uses: actions/download-artifact@v8
         with:
-          name: raw-${{ matrix.channel.id }}
+          name: raw-arm64-${{ matrix.channel.id }}
           path: raw-artifacts
 
       - name: Verify Android ELF and shell entrypoint contract
@@ -241,7 +243,7 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         with:
-          name: verified-${{ matrix.channel.id }}
+          name: verified-arm64-${{ matrix.channel.id }}
           path: verified-artifact
           if-no-files-found: error
           retention-days: 7
@@ -257,14 +259,14 @@ jobs:
 
       - uses: actions/download-artifact@v8
         with:
-          pattern: verified-*
+          pattern: verified-arm64-*
           path: verified-artifacts
           merge-multiple: true
 
       - id: release
         name: Package assets, checksums, and manifest
         env:
-          RELEASE_PREFIX: ${{ needs.validate-config.outputs.release_prefix }}
+          RELEASE_TAG: ${{ needs.validate-config.outputs.release_tag }}
           TEMPLATE_REPOSITORY: ${{ needs.validate-config.outputs.template_repository }}
           TEMPLATE_REF: ${{ needs.validate-config.outputs.template_ref }}
           GO_VERSION: ${{ needs.validate-config.outputs.go_version }}
@@ -273,7 +275,7 @@ jobs:
           XZ_COMPRESSION_LEVEL: ${{ needs.validate-config.outputs.compression_level }}
         run: |
           set -euo pipefail
-          release_tag="${RELEASE_PREFIX}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          release_tag="$RELEASE_TAG"
           generated_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           mkdir -p normalized-artifacts
           while IFS= read -r channel; do
@@ -296,7 +298,7 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         with:
-          name: release-assets
+          name: release-assets-arm64
           path: release-assets
           if-no-files-found: error
           retention-days: 14
@@ -308,15 +310,21 @@ jobs:
     steps:
       - uses: actions/download-artifact@v8
         with:
-          name: release-assets
+          name: release-assets-arm64
           path: release-assets
 
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65
         with:
           tag_name: ${{ needs.package-release.outputs.release_tag }}
-          name: YumeBox Kernel ${{ needs.package-release.outputs.release_tag }}
+          name: ${{ needs.validate-config.outputs.release_name }}
           body_path: release-assets/RELEASE_NOTES.md
           prerelease: ${{ needs.validate-config.outputs.release_prerelease }}
           make_latest: ${{ needs.validate-config.outputs.release_make_latest }}
-          files: release-assets/*
+          overwrite_files: true
+          files: |
+            release-assets/*.so.xz
+            release-assets/*.so.xz.sha256
+            release-assets/checksums.txt
+            release-assets/kernels.json
+            release-assets/kernels.json.sha256
           fail_on_unmatched_files: true
