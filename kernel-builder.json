@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "shellAbi": 1,
+  "template": {
+    "repository": "YumeYucca/YumeBox",
+    "ref": "Moe"
+  },
+  "channels": [
+    {
+      "id": "stable",
+      "label": "Stable",
+      "repository": "https://github.com/MetaCubeX/mihomo.git",
+      "ref": "Alpha",
+      "suffix": "-Stable",
+      "patches": "patches/stable"
+    },
+    {
+      "id": "alpha",
+      "label": "Alpha",
+      "repository": "https://github.com/MetaCubeX/mihomo.git",
+      "ref": "Alpha",
+      "suffix": "",
+      "patches": "patches/alpha"
+    },
+    {
+      "id": "meta",
+      "label": "Meta",
+      "repository": "https://github.com/MetaCubeX/mihomo.git",
+      "ref": "Meta",
+      "suffix": "",
+      "patches": "patches/meta"
+    },
+    {
+      "id": "smart",
+      "label": "Smart",
+      "repository": "https://github.com/vernesong/mihomo.git",
+      "ref": "Alpha",
+      "suffix": "-Smart",
+      "patches": "patches/smart"
+    }
+  ]
+}

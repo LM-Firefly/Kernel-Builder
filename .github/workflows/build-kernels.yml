@@ -1,0 +1,161 @@
+name: Build Kernel Releases
+
+on:
+  schedule:
+    - cron: "0 18 * * *"
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: "Optional channel id; empty builds all configured channels"
+        required: false
+        type: string
+  repository_dispatch:
+    types: [kernel-update]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: kernel-release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.config.outputs.matrix }}
+      template_repository: ${{ steps.config.outputs.template_repository }}
+      template_ref: ${{ steps.config.outputs.template_ref }}
+    steps:
+      - uses: actions/checkout@v6
+      - id: config
+        shell: bash
+        env:
+          REQUESTED_CHANNEL: ${{ inputs.channel || github.event.client_payload.channel || '' }}
+        run: |
+          set -euo pipefail
+          if [ -n "$REQUESTED_CHANNEL" ]; then
+            matrix=$(jq -c --arg id "$REQUESTED_CHANNEL" '[.channels[] | select(.id == $id)]' kernel-builder.json)
+            test "$(jq length <<<"$matrix")" -eq 1
+          else
+            matrix=$(jq -c '.channels' kernel-builder.json)
+          fi
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "template_repository=$(jq -r '.template.repository' kernel-builder.json)" >> "$GITHUB_OUTPUT"
+          echo "template_ref=$(jq -r '.template.ref' kernel-builder.json)" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        channel: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+        abi: [armeabi-v7a, arm64-v8a, x86, x86_64]
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      ABI_APP_LIST: ${{ matrix.abi }}
+    steps:
+      - name: Checkout builder template
+        uses: actions/checkout@v6
+
+      - name: Checkout shell and adapter template
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ needs.prepare.outputs.template_repository }}
+          ref: ${{ needs.prepare.outputs.template_ref }}
+          path: app-template
+          # For a private template repository, set TEMPLATE_REPOSITORY_TOKEN in repository secrets.
+          token: ${{ secrets.TEMPLATE_REPOSITORY_TOKEN || github.token }}
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "24"
+
+      - uses: fwilhe2/setup-kotlin@88d53291848568823e529973af5d0cdb8ddf8d87
+
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
+        with:
+          go-download-base-url: "https://github.com/MetaCubeX/go/releases/download/build"
+          go-version: "1.26"
+          cache: false
+
+      - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699
+
+      - name: Install Android NDK
+        run: sdkmanager "ndk;30.0.14904198"
+
+      - name: Configure template toolchain
+        working-directory: app-template
+        run: |
+          printf 'sdk.dir=%s\nndk.dir=%s/ndk/30.0.14904198\n' "$ANDROID_SDK_ROOT" "$ANDROID_SDK_ROOT" > local.properties
+
+      - name: Checkout kernel source
+        working-directory: app-template
+        env:
+          KERNEL_REPOSITORY: ${{ matrix.channel.repository }}
+          KERNEL_REF: ${{ matrix.channel.ref }}
+        run: |
+          rm -rf lib/mihomo/mihomo
+          git clone --depth 1 --branch "$KERNEL_REF" "$KERNEL_REPOSITORY" lib/mihomo/mihomo
+
+      - name: Apply builder patches
+        env:
+          PATCH_DIRECTORY: ${{ matrix.channel.patches }}
+        run: |
+          if [ -d "$PATCH_DIRECTORY" ]; then
+            mkdir -p app-template/.github/patches/mihomo
+            cp -a "$PATCH_DIRECTORY"/. app-template/.github/patches/mihomo/
+          fi
+
+      - name: Build core with the fixed shell adapter
+        working-directory: app-template
+        env:
+          EXTERNAL_MIHOMO_BRANCH: ${{ matrix.channel.id }}
+          EXTERNAL_MIHOMO_SUFFIX: ${{ matrix.channel.suffix }}
+        run: kotlin scripts/native-build.main.kts --go
+
+      - name: Verify core contract
+        run: scripts/verify-core.sh "app-template/jniLibs/${{ matrix.abi }}/libmihomocore.so" "${{ matrix.abi }}"
+
+      - name: Stage kernel artifact
+        run: |
+          mkdir -p "kernel-artifact/${{ matrix.channel.id }}/${{ matrix.abi }}"
+          cp "app-template/jniLibs/${{ matrix.abi }}/libmihomocore.so" "kernel-artifact/${{ matrix.channel.id }}/${{ matrix.abi }}/"
+          cp "app-template/jniLibs/${{ matrix.abi }}/core-version.properties" "kernel-artifact/${{ matrix.channel.id }}/${{ matrix.abi }}/"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: kernel-${{ matrix.channel.id }}-${{ matrix.abi }}
+          path: kernel-artifact
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: kernel-*
+          path: kernel-artifacts
+          merge-multiple: true
+
+      - name: Package release assets
+        env:
+          RELEASE_TAG: kernel-${{ github.run_id }}
+        run: |
+          generated_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          scripts/package-release.sh kernel-artifacts release-assets "$RELEASE_TAG" "$generated_at"
+
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65
+        with:
+          tag_name: kernel-${{ github.run_id }}
+          name: Kernel ${{ github.run_id }}
+          prerelease: true
+          make_latest: false
+          files: release-assets/*
+          fail_on_unmatched_files: true
