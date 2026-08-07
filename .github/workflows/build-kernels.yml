@@ -442,8 +442,16 @@ jobs:
           generated_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           mkdir -p normalized-artifacts
           while IFS= read -r channel; do
-            mapfile -t cores < <(find verified-artifacts -type f -path "*/${channel}/${ANDROID_ABI}/libmihomocore.so" -print)
-            test "${#cores[@]}" -eq 1
+            mapfile -t cores < <(
+              find verified-artifacts -type f \
+                \( -path "*/${channel}/${ANDROID_ABI}/libmihomocore.so" \
+                -o -path "*/verified-artifact/${channel}/${ANDROID_ABI}/libmihomocore.so" \) -print
+            )
+            if [ "${#cores[@]}" -ne 1 ]; then
+              printf 'Expected one verified core for %s, found %s:\n' "$channel" "${#cores[@]}" >&2
+              find verified-artifacts -type f -name libmihomocore.so -print >&2
+              exit 1
+            fi
             source_dir=$(dirname "${cores[0]}")
             target_dir="normalized-artifacts/${channel}/${ANDROID_ABI}"
             mkdir -p "$target_dir"
