@@ -30,14 +30,17 @@ for core in "${cores[@]}"; do
   test -f "$properties"
   test -f "$source_metadata"
   name=$(jq -r --arg id "$channel" '.channels[] | select(.id == $id) | .name' kernel-builder.json)
-  commit=$(awk -F= '$1 == "core.commit" { print $2 }' "$properties")
+  core_commit=$(awk -F= '$1 == "core.commit" { print $2 }' "$properties")
   version=$(awk -F= '$1 == "core.displayVersion" { print $2 }' "$properties")
-  [[ "$commit" =~ ^[0-9a-f]{40}$ ]]
+  [[ "$core_commit" =~ ^[0-9a-f]{7,40}$ ]]
   test -n "$version"
   source_repository=$(jq -r '.repository' "$source_metadata")
   source_ref=$(jq -r '.ref' "$source_metadata")
   source_commit=$(jq -r '.commit' "$source_metadata")
   template_commit=$(jq -r '.templateCommit' "$source_metadata")
+  [[ "$source_commit" =~ ^[0-9a-f]{40}$ ]]
+  [[ "$source_commit" == "$core_commit"* ]]
+  commit=$source_commit
   asset="kernel-${channel}.so.xz"
   xz -"$compression_level"e -c "$core" > "$output/$asset"
   sha=$(sha256sum "$output/$asset" | awk '{ print $1 }')
