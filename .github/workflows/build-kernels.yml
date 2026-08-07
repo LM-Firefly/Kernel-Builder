@@ -305,6 +305,22 @@ jobs:
           mkdir -p app-template/.github/patches/mihomo
           cp -a "$PATCH_DIRECTORY"/. app-template/.github/patches/mihomo/
 
+      - name: Resolve Go dependencies for selected kernel
+        working-directory: app-template
+        run: |
+          set -euo pipefail
+          # The native adapter is shared by all channels, but its indirect requirements must
+          # come from the checked-out mihomo module. Keeping the template's old graph here makes
+          # Go's MVS select incompatible APIs (notably jls-quic-go) for another channel.
+          mapfile -t inherited_modules < <(
+            go mod edit -C lib/native/go -json |
+              jq -r '.Require[]? | select(.Indirect == true) | .Path'
+          )
+          for module in "${inherited_modules[@]}"; do
+            go mod edit -C lib/native/go -droprequire="$module"
+          done
+          go mod tidy -C lib/native/go
+
       - name: Build ARM64 core through the fixed shell adapter
         working-directory: app-template
         env:
