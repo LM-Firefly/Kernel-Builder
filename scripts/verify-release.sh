@@ -38,7 +38,10 @@ while IFS=$'\t' read -r asset sha; do
   actual=$(sha256sum "$release_dir/$asset" | awk '{ print $1 }')
   test "$actual" = "$sha"
   xz -t "$release_dir/$asset"
-  printf '%s  %s\n' "$sha" "$asset" | sha256sum --check --status -
+  (
+    cd "$release_dir"
+    printf '%s  %s\n' "$sha" "$asset" | sha256sum --check --status -
+  )
   (
     cd "$release_dir"
     sha256sum --check --status "$asset.sha256"
