@@ -31,10 +31,10 @@ ref、后缀和 patch 目录，但不要改变 `id`，这样 APP 的列表解析
 
 | 字段 | 值 |
 | --- | --- |
-| Tag | `yumebox-kernels-arm64` |
-| Name | `YumeBox Kernels (arm64-v8a)` |
+| Tag | `kernel` |
+| Name | `Meta Alpha Smart` |
 | 类型 | prerelease，且不标记为 latest |
-| JSON 稳定地址 | `https://github.com/<owner>/<repo>/releases/download/yumebox-kernels-arm64/kernels.json` |
+| JSON 稳定地址 | `https://github.com/<owner>/<repo>/releases/download/kernel/kernels.json` |
 | 支持 ABI | `arm64-v8a` |
 
 固定资产名会被覆盖，不会在同一 Release 中残留旧 commit 文件；实际源版本始终记录在
@@ -71,8 +71,8 @@ APP 只需读取 `kernels` 数组，不需要解析资产文件名：
   "name": "Mihomo Alpha",
   "version": "v1.19.29",
   "asset": "libmihomocore-alpha-arm64-v8a.so.xz",
-  "downloadUrl": "https://github.com/owner/repo/releases/download/yumebox-kernels-arm64/libmihomocore-alpha-arm64-v8a.so.xz",
-  "checksumUrl": "https://github.com/owner/repo/releases/download/yumebox-kernels-arm64/libmihomocore-alpha-arm64-v8a.so.xz.sha256",
+  "downloadUrl": "https://github.com/owner/repo/releases/download/kernel/libmihomocore-alpha-arm64-v8a.so.xz",
+  "checksumUrl": "https://github.com/owner/repo/releases/download/kernel/libmihomocore-alpha-arm64-v8a.so.xz.sha256",
   "sha256": "..."
 }
 ```
@@ -84,7 +84,7 @@ APP 只需读取 `kernels` 数组，不需要解析资产文件名：
 | 构建后 | `raw-arm64-<channel>` | 未压缩 `.so`、版本 properties、源 commit JSON | 7 天 | 否 |
 | 验证后 | `verified-arm64-<channel>` | 通过 ELF/入口点验证的同一组文件 | 7 天 | 否 |
 | 打包后 | `release-assets-arm64` | 最终压缩包、校验文件、JSON、Release notes | 14 天 | 否 |
-| 发布后 | 固定 Release `yumebox-kernels-arm64` | 上表“最终 Release 资产” | 由 GitHub 保留 | 是 |
+| 发布后 | 固定 Release `kernel` / `Meta Alpha Smart` | 上表“最终 Release 资产” | 由 GitHub 保留 | 是 |
 
 ## 本地检查
 
