@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       channel:
-        description: "Optional channel id; empty builds all configured channels"
+        description: "Optional channel id; empty builds every configured channel"
         required: false
         type: string
   repository_dispatch:
@@ -16,146 +16,307 @@ permissions:
   contents: write
 
 concurrency:
-  group: kernel-release
+  group: kernel-release-${{ github.repository }}
   cancel-in-progress: false
 
 jobs:
-  prepare:
+  validate-config:
+    name: Validate configuration
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.config.outputs.matrix }}
       template_repository: ${{ steps.config.outputs.template_repository }}
       template_ref: ${{ steps.config.outputs.template_ref }}
+      android_ndk_version: ${{ steps.config.outputs.android_ndk_version }}
+      android_min_sdk: ${{ steps.config.outputs.android_min_sdk }}
+      android_abi: ${{ steps.config.outputs.android_abi }}
+      java_version: ${{ steps.config.outputs.java_version }}
+      go_version: ${{ steps.config.outputs.go_version }}
+      go_download_base_url: ${{ steps.config.outputs.go_download_base_url }}
+      release_prefix: ${{ steps.config.outputs.release_prefix }}
+      release_prerelease: ${{ steps.config.outputs.release_prerelease }}
+      release_make_latest: ${{ steps.config.outputs.release_make_latest }}
+      compression_level: ${{ steps.config.outputs.compression_level }}
     steps:
       - uses: actions/checkout@v6
+
+      - name: Validate runner tools
+        run: |
+          set -euo pipefail
+          command -v git
+          command -v jq
+          command -v xz
+          command -v sha256sum
+          command -v readelf
+          command -v file
+
       - id: config
+        name: Parse .env and builder configuration
         shell: bash
         env:
           REQUESTED_CHANNEL: ${{ inputs.channel || github.event.client_payload.channel || '' }}
         run: |
           set -euo pipefail
+          source scripts/load-env.sh .env
+          scripts/validate-config.sh .env kernel-builder.json
+
           if [ -n "$REQUESTED_CHANNEL" ]; then
-            matrix=$(jq -c --arg id "$REQUESTED_CHANNEL" '[.channels[] | select(.id == $id)]' kernel-builder.json)
+            matrix=$(jq -ce --arg id "$REQUESTED_CHANNEL" '[.channels[] | select(.id == $id)]' kernel-builder.json)
             test "$(jq length <<<"$matrix")" -eq 1
           else
-            matrix=$(jq -c '.channels' kernel-builder.json)
+            matrix=$(jq -ce '.channels' kernel-builder.json)
           fi
-          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
-          echo "template_repository=$(jq -r '.template.repository' kernel-builder.json)" >> "$GITHUB_OUTPUT"
-          echo "template_ref=$(jq -r '.template.ref' kernel-builder.json)" >> "$GITHUB_OUTPUT"
 
-  build:
-    needs: prepare
+          {
+            printf 'matrix=%s\n' "$matrix"
+            printf 'template_repository=%s\n' "$TEMPLATE_REPOSITORY"
+            printf 'template_ref=%s\n' "$TEMPLATE_REF"
+            printf 'android_ndk_version=%s\n' "$ANDROID_NDK_VERSION"
+            printf 'android_min_sdk=%s\n' "$ANDROID_MIN_SDK"
+            printf 'android_abi=%s\n' "$ANDROID_ABI"
+            printf 'java_version=%s\n' "$JAVA_VERSION"
+            printf 'go_version=%s\n' "$GO_VERSION"
+            printf 'go_download_base_url=%s\n' "$GO_DOWNLOAD_BASE_URL"
+            printf 'release_prefix=%s\n' "$RELEASE_PREFIX"
+            printf 'release_prerelease=%s\n' "$RELEASE_PRERELEASE"
+            printf 'release_make_latest=%s\n' "$RELEASE_MAKE_LATEST"
+            printf 'compression_level=%s\n' "$COMPRESSION_LEVEL"
+          } >> "$GITHUB_OUTPUT"
+
+  build-core:
+    name: Build ${{ matrix.channel.id }} arm64
+    needs: validate-config
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        channel: ${{ fromJSON(needs.prepare.outputs.matrix) }}
-        abi: [arm64-v8a]
-    runs-on: ubuntu-latest
+        channel: ${{ fromJSON(needs.validate-config.outputs.matrix) }}
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-      ABI_APP_LIST: ${{ matrix.abi }}
+      ABI_APP_LIST: ${{ needs.validate-config.outputs.android_abi }}
     steps:
-      - name: Checkout builder template
+      - name: Checkout builder configuration
         uses: actions/checkout@v6
 
-      - name: Checkout shell and adapter template
+      - name: Checkout fixed shell and Go adapter
         uses: actions/checkout@v6
         with:
-          repository: ${{ needs.prepare.outputs.template_repository }}
-          ref: ${{ needs.prepare.outputs.template_ref }}
+          repository: ${{ needs.validate-config.outputs.template_repository }}
+          ref: ${{ needs.validate-config.outputs.template_ref }}
           path: app-template
-          # For a private template repository, set TEMPLATE_REPOSITORY_TOKEN in repository secrets.
           token: ${{ secrets.TEMPLATE_REPOSITORY_TOKEN || github.token }}
-          fetch-depth: 0
+          fetch-depth: 1
 
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: "24"
+          java-version: ${{ needs.validate-config.outputs.java_version }}
 
       - uses: fwilhe2/setup-kotlin@88d53291848568823e529973af5d0cdb8ddf8d87
 
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
         with:
-          go-download-base-url: "https://github.com/MetaCubeX/go/releases/download/build"
-          go-version: "1.26"
+          go-download-base-url: ${{ needs.validate-config.outputs.go_download_base_url }}
+          go-version: ${{ needs.validate-config.outputs.go_version }}
           cache: false
 
       - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699
 
       - name: Install Android NDK
-        run: sdkmanager "ndk;30.0.14904198"
+        run: sdkmanager "ndk;${{ needs.validate-config.outputs.android_ndk_version }}"
 
       - name: Configure template toolchain
         working-directory: app-template
         run: |
-          printf 'sdk.dir=%s\nndk.dir=%s/ndk/30.0.14904198\n' "$ANDROID_SDK_ROOT" "$ANDROID_SDK_ROOT" > local.properties
+          printf 'sdk.dir=%s\nndk.dir=%s/ndk/%s\n' "$ANDROID_SDK_ROOT" "$ANDROID_SDK_ROOT" "${{ needs.validate-config.outputs.android_ndk_version }}" > local.properties
 
-      - name: Checkout kernel source
+      - name: Fetch selected kernel source
+        working-directory: app-template
+        env:
+          KERNEL_REPOSITORY: ${{ matrix.channel.repository }}
+          KERNEL_REF: ${{ matrix.channel.ref }}
+          KERNEL_REPOSITORY_TOKEN: ${{ secrets.KERNEL_REPOSITORY_TOKEN }}
+        run: |
+          set -euo pipefail
+          target=lib/mihomo/mihomo
+          rm -rf "$target"
+          mkdir -p "$target"
+          git -C "$target" init --quiet
+          source_url="$KERNEL_REPOSITORY"
+          if [ -n "${KERNEL_REPOSITORY_TOKEN:-}" ] && [[ "$source_url" == https://github.com/* ]]; then
+            source_url="${source_url/https:\/\//https://x-access-token:${KERNEL_REPOSITORY_TOKEN}@}"
+          fi
+          git -C "$target" remote add origin "$source_url"
+          git -C "$target" fetch --depth=1 origin "$KERNEL_REF"
+          git -C "$target" checkout --detach --quiet FETCH_HEAD
+          git -C "$target" remote set-url origin "$KERNEL_REPOSITORY"
+
+      - name: Apply channel patches
+        env:
+          PATCH_DIRECTORY: ${{ matrix.channel.patches }}
+        run: |
+          set -euo pipefail
+          mkdir -p app-template/.github/patches/mihomo
+          cp -a "$PATCH_DIRECTORY"/. app-template/.github/patches/mihomo/
+
+      - name: Build ARM64 core through the fixed shell adapter
+        working-directory: app-template
+        env:
+          EXTERNAL_MIHOMO_BRANCH: ${{ matrix.channel.id }}
+          EXTERNAL_MIHOMO_SUFFIX: ${{ matrix.channel.suffix }}
+          ANDROID_MIN_SDK: ${{ needs.validate-config.outputs.android_min_sdk }}
+        run: kotlin scripts/native-build.main.kts --go
+
+      - name: Record immutable source metadata
         working-directory: app-template
         env:
           KERNEL_REPOSITORY: ${{ matrix.channel.repository }}
           KERNEL_REF: ${{ matrix.channel.ref }}
         run: |
-          rm -rf lib/mihomo/mihomo
-          git clone --depth 1 --branch "$KERNEL_REF" "$KERNEL_REPOSITORY" lib/mihomo/mihomo
+          set -euo pipefail
+          core_dir="jniLibs/${{ needs.validate-config.outputs.android_abi }}"
+          source_commit=$(git -C lib/mihomo/mihomo rev-parse HEAD)
+          template_commit=$(git rev-parse HEAD)
+          jq -n \
+            --arg repository "$KERNEL_REPOSITORY" \
+            --arg ref "$KERNEL_REF" \
+            --arg commit "$source_commit" \
+            --arg templateCommit "$template_commit" \
+            '{repository: $repository, ref: $ref, commit: $commit, templateCommit: $templateCommit}' \
+            > "$core_dir/source.json"
 
-      - name: Apply builder patches
-        env:
-          PATCH_DIRECTORY: ${{ matrix.channel.patches }}
+      - name: Stage raw core
         run: |
-          if [ -d "$PATCH_DIRECTORY" ]; then
-            mkdir -p app-template/.github/patches/mihomo
-            cp -a "$PATCH_DIRECTORY"/. app-template/.github/patches/mihomo/
-          fi
-
-      - name: Build core with the fixed shell adapter
-        working-directory: app-template
-        env:
-          EXTERNAL_MIHOMO_BRANCH: ${{ matrix.channel.id }}
-          EXTERNAL_MIHOMO_SUFFIX: ${{ matrix.channel.suffix }}
-        run: kotlin scripts/native-build.main.kts --go
-
-      - name: Verify core contract
-        run: scripts/verify-core.sh "app-template/jniLibs/${{ matrix.abi }}/libmihomocore.so" "${{ matrix.abi }}"
-
-      - name: Stage kernel artifact
-        run: |
-          mkdir -p "kernel-artifact/${{ matrix.channel.id }}/${{ matrix.abi }}"
-          cp "app-template/jniLibs/${{ matrix.abi }}/libmihomocore.so" "kernel-artifact/${{ matrix.channel.id }}/${{ matrix.abi }}/"
-          cp "app-template/jniLibs/${{ matrix.abi }}/core-version.properties" "kernel-artifact/${{ matrix.channel.id }}/${{ matrix.abi }}/"
+          set -euo pipefail
+          artifact_dir="kernel-artifact/${{ matrix.channel.id }}/${{ needs.validate-config.outputs.android_abi }}"
+          mkdir -p "$artifact_dir"
+          cp "app-template/jniLibs/${{ needs.validate-config.outputs.android_abi }}/libmihomocore.so" "$artifact_dir/"
+          cp "app-template/jniLibs/${{ needs.validate-config.outputs.android_abi }}/core-version.properties" "$artifact_dir/"
+          cp "app-template/jniLibs/${{ needs.validate-config.outputs.android_abi }}/source.json" "$artifact_dir/"
 
       - uses: actions/upload-artifact@v7
         with:
-          name: kernel-${{ matrix.channel.id }}-${{ matrix.abi }}
+          name: raw-${{ matrix.channel.id }}
           path: kernel-artifact
           if-no-files-found: error
+          retention-days: 7
 
-  release:
-    needs: build
+  verify-core:
+    name: Verify ${{ matrix.channel.id }} arm64
+    needs: [validate-config, build-core]
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        channel: ${{ fromJSON(needs.validate-config.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v6
 
       - uses: actions/download-artifact@v8
         with:
-          pattern: kernel-*
-          path: kernel-artifacts
+          name: raw-${{ matrix.channel.id }}
+          path: raw-artifacts
+
+      - name: Verify Android ELF and shell entrypoint contract
+        run: |
+          set -euo pipefail
+          mapfile -t cores < <(find raw-artifacts -type f -name libmihomocore.so -print)
+          test "${#cores[@]}" -eq 1
+          core=${cores[0]}
+          scripts/verify-core.sh "$core" "${{ needs.validate-config.outputs.android_abi }}"
+          mapfile -t source_files < <(find raw-artifacts -type f -name source.json -print)
+          test "${#source_files[@]}" -eq 1
+          source_json=${source_files[0]}
+          jq -e '.commit | test("^[0-9a-f]{40}$")' "$source_json" >/dev/null
+          jq -e '.templateCommit | test("^[0-9a-f]{40}$")' "$source_json" >/dev/null
+
+      - name: Stage verified core
+        run: |
+          set -euo pipefail
+          core=$(find raw-artifacts -type f -name libmihomocore.so -print -quit)
+          source_dir=$(dirname "$core")
+          target_dir="verified-artifact/${{ matrix.channel.id }}/${{ needs.validate-config.outputs.android_abi }}"
+          mkdir -p "$target_dir"
+          cp "$source_dir/libmihomocore.so" "$source_dir/core-version.properties" "$source_dir/source.json" "$target_dir/"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: verified-${{ matrix.channel.id }}
+          path: verified-artifact
+          if-no-files-found: error
+          retention-days: 7
+
+  package-release:
+    name: Compress cores and generate release JSON
+    needs: [validate-config, verify-core]
+    runs-on: ubuntu-latest
+    outputs:
+      release_tag: ${{ steps.release.outputs.release_tag }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: verified-*
+          path: verified-artifacts
           merge-multiple: true
 
-      - name: Package release assets
+      - id: release
+        name: Package assets, checksums, and manifest
         env:
-          RELEASE_TAG: kernel-${{ github.run_id }}
+          RELEASE_PREFIX: ${{ needs.validate-config.outputs.release_prefix }}
+          TEMPLATE_REPOSITORY: ${{ needs.validate-config.outputs.template_repository }}
+          TEMPLATE_REF: ${{ needs.validate-config.outputs.template_ref }}
+          GO_VERSION: ${{ needs.validate-config.outputs.go_version }}
+          ANDROID_NDK_VERSION: ${{ needs.validate-config.outputs.android_ndk_version }}
+          ANDROID_ABI: ${{ needs.validate-config.outputs.android_abi }}
+          XZ_COMPRESSION_LEVEL: ${{ needs.validate-config.outputs.compression_level }}
         run: |
+          set -euo pipefail
+          release_tag="${RELEASE_PREFIX}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           generated_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          scripts/package-release.sh kernel-artifacts release-assets "$RELEASE_TAG" "$generated_at"
+          mkdir -p normalized-artifacts
+          while IFS= read -r channel; do
+            mapfile -t cores < <(find verified-artifacts -type f -path "*/${channel}/${ANDROID_ABI}/libmihomocore.so" -print)
+            test "${#cores[@]}" -eq 1
+            source_dir=$(dirname "${cores[0]}")
+            target_dir="normalized-artifacts/${channel}/${ANDROID_ABI}"
+            mkdir -p "$target_dir"
+            cp "$source_dir/libmihomocore.so" "$source_dir/core-version.properties" "$source_dir/source.json" "$target_dir/"
+          done < <(jq -r '.channels[].id' kernel-builder.json)
+          scripts/package-release.sh normalized-artifacts release-assets "$release_tag" "$generated_at" "$GITHUB_REPOSITORY" "$TEMPLATE_REPOSITORY" "$TEMPLATE_REF" "$GO_VERSION" "$ANDROID_NDK_VERSION"
+          scripts/verify-release.sh release-assets
+          {
+            printf '# YumeBox Kernel Release\n\n'
+            printf 'Only arm64-v8a shared cores are published. Verify kernels.json.sha256, then verify the selected asset SHA-256 before installing it.\n\n'
+            printf '## Kernels\n\n'
+            jq -r '.kernels[] | "- **\\(.label)**: `\\(.version)` (`\\(.commit[0:7])`)"' release-assets/kernels.json
+          } > release-assets/RELEASE_NOTES.md
+          printf 'release_tag=%s\n' "$release_tag" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-assets
+          path: release-assets
+          if-no-files-found: error
+          retention-days: 14
+
+  publish-release:
+    name: Publish GitHub prerelease
+    needs: [validate-config, package-release]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-assets
+          path: release-assets
 
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65
         with:
-          tag_name: kernel-${{ github.run_id }}
-          name: Kernel ${{ github.run_id }}
-          prerelease: true
-          make_latest: false
+          tag_name: ${{ needs.package-release.outputs.release_tag }}
+          name: YumeBox Kernel ${{ needs.package-release.outputs.release_tag }}
+          body_path: release-assets/RELEASE_NOTES.md
+          prerelease: ${{ needs.validate-config.outputs.release_prerelease }}
+          make_latest: ${{ needs.validate-config.outputs.release_make_latest }}
           files: release-assets/*
           fail_on_unmatched_files: true

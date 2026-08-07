@@ -1,46 +1,55 @@
 # YumeBox Kernel Builder
 
-独立的 mihomo 内核构建仓库。它只发布 `libmihomocore.so`，不发布 APP，也不修改 YumeBox
-主仓库的 release。壳和 Go adapter 来自配置的模板仓库，构建后的内核通过 GitHub Release
-供 APP 下载。当前版本只构建和发布 `arm64-v8a`，不再生成 32 位 ARM、x86 或 x86_64 产物。
+这是一个独立的内核构建仓库。它只发布 `libmihomocore.so`，不构建 APP，也不修改
+YumeBox 主仓库的 release。固定壳和 Go adapter 来自 `.env` 指定的模板仓库；每个渠道的
+内核仓库、分支/tag 和 patch 在 `kernel-builder.json` 中定义。当前只构建 Android
+`arm64-v8a`。
 
-## 自定义内核
+## 配置
 
-编辑 `kernel-builder.json`：
+`.env` 是非敏感的工具链和发布配置，已经提供默认模板；`.env.example` 用于重新创建配置。
+不要把 token 写入 `.env`，私有模板或内核使用 Actions Secrets：
 
-- `template.repository/ref`：提供固定壳、Go adapter 和 `scripts/native-build.main.kts` 的模板仓库。
-- `channels[]`：每个渠道可以使用不同的内核仓库、分支或 tag。
-- `channels[].patches`：该渠道额外 patch 目录；patch 会叠加到模板仓库已有的 mihomo patch。
+- `TEMPLATE_REPOSITORY_TOKEN`：读取私有壳/adapter 模板。
+- `KERNEL_REPOSITORY_TOKEN`：读取私有内核源仓库。
 
-用户可以直接 fork 本仓库，修改这些字段后启用自己的 Action。内核源代码不需要复制到
-builder 仓库，Action 在 runner 中临时 clone，构建完成后只上传二进制和版本元数据。
+`kernel-builder.json` 的 `channels[]` 可完全替换为自己的内核地址、ref、后缀和 patch 目录。
+工作流支持定时构建、手动构建，以及上游通过 `repository_dispatch` 发送 `kernel-update`。
 
-## 默认渠道
+## 工作流阶段
 
-`stable` 是当前官方 Alpha 内核的 Stable 标签，保证默认配置可用。确认上游稳定 tag 后，
-把它的 `ref` 改为具体 tag；`alpha`、`meta`、`smart` 分别对应官方 Alpha、Meta 和 Smart
-源。这里的映射只是模板，使用者可以完全替换 repository/ref。
+1. `validate-config` 解析 `.env`，校验 JSON、patch 目录、工具链和唯一渠道，并生成矩阵。
+2. `build-core` 为每个渠道独立 checkout 壳与内核，应用 patch，只构建 ARM64。
+3. `verify-core` 用 `file`/`readelf` 校验 ELF、架构和 `MihomoMain` 导出，并锁定源 commit。
+4. `package-release` 压缩 `.so`，生成 sidecar SHA-256、`checksums.txt`、`kernels.json` 和校验报告。
+5. `publish-release` 只在全部渠道成功后创建 GitHub prerelease。
 
-## Release 格式
+## Release 资产
 
-每次运行产生不可变的 prerelease：
+每次运行创建不可变的 `yumebox-kernel-<run-id>-<attempt>` release，资产类似：
 
 ```text
-kernel-<channel>-<abi>.so.xz
+libmihomocore-alpha-arm64-v8a-1af24e9.so.xz
+libmihomocore-alpha-arm64-v8a-1af24e9.so.xz.sha256
 kernels.json
+kernels.json.sha256
+checksums.txt
+RELEASE_NOTES.md
 ```
 
-`kernels.json` 包含 ARM64 ABI、shell ABI、源 commit、显示版本和 SHA-256。APP 下载后必须先校验
-SHA-256，再写入临时文件并原子替换；失败时继续使用当前内核或恢复内置内核。
-
-当前 workflow 支持每日构建、手动构建和 `repository_dispatch` 的 `kernel-update` 事件。上游
-镜像可以在推送后调用该事件；没有 webhook 时由每日任务兜底。
+这与 mihomo Alpha 的 `checksums.txt` 和带短 commit 的资产命名保持同一思路。`kernels.json`
+使用 schema version 2，包含 shell ABI、源仓库/ref/commit、模板 commit、压缩格式、工具链、
+下载 URL 和 SHA-256。APP 必须先通过 manifest 和 SHA-256 校验，再将解压后的 ARM64 ELF
+写入临时文件并原子替换；失败时保留当前内核或回退到内置内核。
 
 ## 本地检查
 
 ```text
-scripts/verify-core.sh <libmihomocore.so> <abi>
-scripts/package-release.sh <artifact-root> <output-dir> <release-tag> <generated-at>
+scripts/validate-config.sh .env kernel-builder.json
+scripts/verify-core.sh <libmihomocore.so> arm64-v8a
+scripts/package-release.sh <artifact-root> <output-dir> <release-tag> <generated-at> <release-repository> <template-repository> <template-ref> <go-version> <ndk-version>
+scripts/verify-release.sh <release-dir>
 ```
 
-APP 集成时应固定 shell ABI 和 `MihomoMain` 协议；替换内核不会替换壳。
+SHA-256 只能检测传输损坏，不能单独证明发布者身份。生产环境还应在 APP 侧增加签名或
+可信 release 仓库约束。

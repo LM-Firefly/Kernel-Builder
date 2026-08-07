@@ -11,7 +11,7 @@
       "id": "stable",
       "label": "Stable",
       "repository": "https://github.com/MetaCubeX/mihomo.git",
-      "ref": "Alpha",
+      "ref": "v1.19.29",
       "suffix": "-Stable",
       "patches": "patches/stable"
     },

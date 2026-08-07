@@ -1,26 +1,51 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "required": ["schemaVersion", "shellAbi", "abis", "releaseTag", "generatedAt", "kernels"],
+  "required": ["schemaVersion", "shellAbi", "abi", "releaseTag", "releaseUrl", "generatedAt", "template", "toolchain", "kernels"],
   "properties": {
-    "schemaVersion": { "const": 1 },
+    "schemaVersion": { "const": 2 },
     "shellAbi": { "type": "integer", "minimum": 1 },
-    "abis": { "const": ["arm64-v8a"] },
+    "abi": { "const": "arm64-v8a" },
     "releaseTag": { "type": "string", "minLength": 1 },
+    "releaseUrl": { "type": "string", "format": "uri" },
     "generatedAt": { "type": "string", "minLength": 1 },
+    "template": {
+      "type": "object",
+      "required": ["repository", "ref"],
+      "properties": {
+        "repository": { "type": "string", "minLength": 1 },
+        "ref": { "type": "string", "minLength": 1 }
+      }
+    },
+    "toolchain": {
+      "type": "object",
+      "required": ["go", "ndk", "compression", "compressionLevel"],
+      "properties": {
+        "go": { "type": "string", "minLength": 1 },
+        "ndk": { "type": "string", "minLength": 1 },
+        "compression": { "const": "xz" },
+        "compressionLevel": { "type": "integer", "minimum": 0, "maximum": 9 }
+      }
+    },
     "kernels": {
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["channel", "label", "abi", "asset", "sha256", "commit", "version"],
+        "required": ["channel", "label", "abi", "asset", "sha256", "commit", "version", "repository", "ref", "sourceCommit", "templateCommit", "downloadUrl", "compression"],
         "properties": {
           "channel": { "type": "string", "minLength": 1 },
           "label": { "type": "string", "minLength": 1 },
           "abi": { "type": "string", "minLength": 1 },
           "asset": { "type": "string", "minLength": 1 },
           "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-          "commit": { "type": "string", "minLength": 4 },
-          "version": { "type": "string", "minLength": 1 }
+          "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+          "version": { "type": "string", "minLength": 1 },
+          "repository": { "type": "string", "minLength": 1 },
+          "ref": { "type": "string", "minLength": 1 },
+          "sourceCommit": { "type": "string", "minLength": 7 },
+          "templateCommit": { "type": "string", "minLength": 7 },
+          "downloadUrl": { "type": "string", "format": "uri" },
+          "compression": { "const": "xz" }
         }
       }
     }

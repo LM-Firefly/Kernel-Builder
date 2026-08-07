@@ -1,14 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-root=${1:?usage: package-release.sh <artifact-root> <output-dir> <release-tag> <generated-at>}
-output=${2:?usage: package-release.sh <artifact-root> <output-dir> <release-tag> <generated-at>}
-release_tag=${3:?usage: package-release.sh <artifact-root> <output-dir> <release-tag> <generated-at>}
-generated_at=${4:?usage: package-release.sh <artifact-root> <output-dir> <release-tag> <generated-at>}
+root=${1:?usage: package-release.sh <artifact-root> <output-dir> <release-tag> <generated-at> <release-repository> <template-repository> <template-ref> <go-version> <ndk-version>}
+output=${2:?usage: package-release.sh <artifact-root> <output-dir> <release-tag> <generated-at> <release-repository> <template-repository> <template-ref> <go-version> <ndk-version>}
+release_tag=${3:?usage: package-release.sh <artifact-root> <output-dir> <release-tag> <generated-at> <release-repository> <template-repository> <template-ref> <go-version> <ndk-version>}
+generated_at=${4:?usage: package-release.sh <artifact-root> <output-dir> <release-tag> <generated-at> <release-repository> <template-repository> <template-ref> <go-version> <ndk-version>}
+release_repository=${5:?usage: package-release.sh <artifact-root> <output-dir> <release-tag> <generated-at> <release-repository> <template-repository> <template-ref> <go-version> <ndk-version>}
+template_repository=${6:?usage: package-release.sh <artifact-root> <output-dir> <release-tag> <generated-at> <release-repository> <template-repository> <template-ref> <go-version> <ndk-version>}
+template_ref=${7:?usage: package-release.sh <artifact-root> <output-dir> <release-tag> <generated-at> <release-repository> <template-repository> <template-ref> <go-version> <ndk-version>}
+go_version=${8:?usage: package-release.sh <artifact-root> <output-dir> <release-tag> <generated-at> <release-repository> <template-repository> <template-ref> <go-version> <ndk-version>}
+ndk_version=${9:?usage: package-release.sh <artifact-root> <output-dir> <release-tag> <generated-at> <release-repository> <template-repository> <template-ref> <go-version> <ndk-version>}
+compression_level=${XZ_COMPRESSION_LEVEL:-9}
 
 mkdir -p "$output"
 manifest="$output/kernels.json"
 entries='[]'
+checksums="$output/checksums.txt"
 
 shopt -s nullglob
 cores=("$root"/*/*/libmihomocore.so)
@@ -19,12 +26,24 @@ for core in "${cores[@]}"; do
   abi=${rest%%/*}
   test "$abi" = "arm64-v8a"
   properties=${core%/*}/core-version.properties
+  source_metadata=${core%/*}/source.json
+  test -f "$properties"
+  test -f "$source_metadata"
   label=$(jq -r --arg id "$channel" '.channels[] | select(.id == $id) | .label' kernel-builder.json)
   commit=$(awk -F= '$1 == "core.commit" { print $2 }' "$properties")
   version=$(awk -F= '$1 == "core.displayVersion" { print $2 }' "$properties")
-  asset="kernel-${channel}-${abi}.so.xz"
-  xz -9e -c "$core" > "$output/$asset"
+  [[ "$commit" =~ ^[0-9a-f]{40}$ ]]
+  test -n "$version"
+  source_repository=$(jq -r '.repository' "$source_metadata")
+  source_ref=$(jq -r '.ref' "$source_metadata")
+  source_commit=$(jq -r '.commit' "$source_metadata")
+  template_commit=$(jq -r '.templateCommit' "$source_metadata")
+  short_commit=${commit:0:7}
+  asset="libmihomocore-${channel}-${abi}-${short_commit}.so.xz"
+  xz -"$compression_level"e -c "$core" > "$output/$asset"
   sha=$(sha256sum "$output/$asset" | awk '{ print $1 }')
+  printf '%s  %s\n' "$sha" "$asset" > "$output/$asset.sha256"
+  download_url="https://github.com/${release_repository}/releases/download/${release_tag}/${asset}"
   entries=$(jq -c \
     --arg channel "$channel" \
     --arg label "$label" \
@@ -33,20 +52,38 @@ for core in "${cores[@]}"; do
     --arg sha256 "$sha" \
     --arg commit "$commit" \
     --arg version "$version" \
-    '. + [{channel: $channel, label: $label, abi: $abi, asset: $asset, sha256: $sha256, commit: $commit, version: $version}]' \
+    --arg repository "$source_repository" \
+    --arg ref "$source_ref" \
+    --arg sourceCommit "$source_commit" \
+    --arg templateCommit "$template_commit" \
+    --arg downloadUrl "$download_url" \
+    '. + [{channel: $channel, label: $label, abi: $abi, asset: $asset, sha256: $sha256, commit: $commit, version: $version, repository: $repository, ref: $ref, sourceCommit: $sourceCommit, templateCommit: $templateCommit, downloadUrl: $downloadUrl, compression: "xz"}]' \
     <<<"$entries")
 done
 
 test "$(jq 'length' <<<"$entries")" -gt 0
 jq -n \
-  --argjson schemaVersion 1 \
+  --argjson schemaVersion 2 \
   --argjson shellAbi "$(jq '.shellAbi' kernel-builder.json)" \
-  --argjson abis "$(jq '.abis' kernel-builder.json)" \
+  --arg abi "arm64-v8a" \
   --arg releaseTag "$release_tag" \
+  --arg releaseUrl "https://github.com/${release_repository}/releases/tag/${release_tag}" \
   --arg generatedAt "$generated_at" \
+  --arg templateRepository "$template_repository" \
+  --arg templateRef "$template_ref" \
+  --arg goVersion "$go_version" \
+  --arg ndkVersion "$ndk_version" \
+  --argjson compressionLevel "$compression_level" \
   --argjson kernels "$entries" \
-  '{schemaVersion: $schemaVersion, shellAbi: $shellAbi, abis: $abis, releaseTag: $releaseTag, generatedAt: $generatedAt, kernels: $kernels}' \
+  '{schemaVersion: $schemaVersion, shellAbi: $shellAbi, abi: $abi, releaseTag: $releaseTag, releaseUrl: $releaseUrl, generatedAt: $generatedAt, template: {repository: $templateRepository, ref: $templateRef}, toolchain: {go: $goVersion, ndk: $ndkVersion, compression: "xz", compressionLevel: $compressionLevel}, kernels: $kernels}' \
   > "$manifest"
 
 jq empty "$manifest"
+(
+  cd "$output"
+  for file in *.so.xz kernels.json; do
+    sha256sum "$file"
+  done > checksums.txt
+  sha256sum kernels.json > kernels.json.sha256
+)
 echo "Packaged $(jq '.kernels | length' "$manifest") kernel assets in $output"
