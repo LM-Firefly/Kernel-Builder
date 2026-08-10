@@ -237,7 +237,8 @@ jobs:
         working-directory: app-template
         run: |
           set -euo pipefail
-          test -f scripts/native-build.main.kts
+          test -f scripts/native-build.py
+          test -f scripts/native/cli.py
           test -f lib/native/go/native/entry.go
           test -f lib/native/go/go.mod
           test -f lib/native/shell/CMakeLists.txt
@@ -249,7 +250,9 @@ jobs:
           distribution: temurin
           java-version: ${{ needs.validate-config.outputs.java_version }}
 
-      - uses: fwilhe2/setup-kotlin@88d53291848568823e529973af5d0cdb8ddf8d87
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
 
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
         with:
@@ -320,8 +323,9 @@ jobs:
         env:
           EXTERNAL_MIHOMO_BRANCH: ${{ matrix.channel.id }}
           EXTERNAL_MIHOMO_SUFFIX: ${{ matrix.channel.suffix }}
-          ANDROID_MIN_SDK: ${{ needs.validate-config.outputs.android_min_sdk }}
-        run: kotlin scripts/native-build.main.kts --go
+          ANDROID_MINSDK: ${{ needs.validate-config.outputs.android_min_sdk }}
+          ANDROID_NDKVERSION: ${{ needs.validate-config.outputs.android_ndk_version }}
+        run: python3 scripts/native-build.py --go
 
       - name: Record immutable source metadata
         working-directory: app-template
@@ -485,3 +489,30 @@ jobs:
             release-assets/*.so.xz
             release-assets/kernel-index.json
           fail_on_unmatched_files: true
+
+  notify-telegram:
+    name: Notify Telegram
+    needs: [validate-config, package-release, publish-release]
+    runs-on: ubuntu-latest
+    if: always() && needs.publish-release.result == 'success'
+    steps:
+      - name: Send release notification
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+          RELEASE_NAME: ${{ needs.validate-config.outputs.release_name }}
+          RELEASE_TAG: ${{ needs.package-release.outputs.release_tag }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [ -z "$BOT_TOKEN" ] || [ -z "$CHAT_ID" ]; then
+            echo "Telegram notification skipped: BOT_TOKEN and CHAT_ID are required."
+            exit 0
+          fi
+          release_url="https://github.com/${REPOSITORY}/releases/tag/${RELEASE_TAG}"
+          text=$(printf '%s\nTag: %s\nRelease: %s' "$RELEASE_NAME" "$RELEASE_TAG" "$release_url")
+          curl --fail-with-body --silent --show-error \
+            --request POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+            --form "chat_id=${CHAT_ID}" \
+            --form "disable_web_page_preview=true" \
+            --form "text=${text}"
