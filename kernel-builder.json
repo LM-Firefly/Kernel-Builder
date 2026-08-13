@@ -28,7 +28,7 @@
       "name": "Mihomo Smart",
       "repository": "https://github.com/vernesong/mihomo.git",
       "ref": "Alpha",
-      "suffix": "-Smart",
+      "suffix": "",
       "patches": "patches/smart"
     }
   ]

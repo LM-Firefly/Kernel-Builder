@@ -15,6 +15,8 @@ jq -e '
   all(.kernels[];
     (.id | type == "string" and length > 0) and
     (.name | type == "string" and length > 0) and
+    (.commit | test("^[0-9a-f]{40}$")) and
+    (.version == (.id + "-" + .commit[0:8])) and
     .abi == "arm64-v8a" and
     (.asset | endswith(".so.xz")) and
     (.sha256 | test("^[0-9a-f]{64}$")) and
