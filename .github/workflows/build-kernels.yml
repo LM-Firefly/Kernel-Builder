@@ -456,6 +456,7 @@ jobs:
             cp "$source_dir/libmihomocore.so" "$source_dir/core-version.properties" "$source_dir/source.json" "$target_dir/"
           done < <(jq -r '.channels[].id' kernel-builder.json)
           scripts/package-release.sh normalized-artifacts release-assets "$release_tag" "$generated_at" "$GITHUB_REPOSITORY" "$TEMPLATE_REPOSITORY" "$TEMPLATE_REF" "$GO_VERSION" "$ANDROID_NDK_VERSION"
+          chmod +x scripts/verify-release.sh
           scripts/verify-release.sh release-assets
           jq -r '.generatedAt' release-assets/kernel-index.json > release-assets/RELEASE_NOTES.md
           printf 'release_tag=%s\n' "$release_tag" >> "$GITHUB_OUTPUT"
