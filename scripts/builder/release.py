@@ -28,17 +28,15 @@ def index_cores(root: Path, abi: str) -> dict[str, Path]:
     return indexed
 
 def compress_core(source: Path, target: Path, preset: int) -> tuple[str, int]:
-    """Compress a core while hashing it, without loading the archive in memory."""
-    digest = hashlib.sha256()
-    size = 0
+    """Compress a core and checksum the final archive without loading it."""
     with source.open("rb") as source_file, lzma.open(
         target, "wb", format=lzma.FORMAT_XZ, preset=preset
     ) as compressed:
         while chunk := source_file.read(1024 * 1024):
-            digest.update(chunk)
-            size += len(chunk)
             compressed.write(chunk)
-    return digest.hexdigest(), target.stat().st_size
+    with target.open("rb") as compressed_file:
+        digest = hashlib.file_digest(compressed_file, "sha256").hexdigest()
+    return digest, target.stat().st_size
 
 def verify_release_directory(directory: Path) -> None:
     manifest = read_json(directory / "kernel-index.json")
@@ -279,5 +277,4 @@ def package_release(args: argparse.Namespace) -> None:
     if args.github_output:
         write_outputs(Path(args.github_output), {"release_tag": args.release_tag})
     print(f"Packaged {len(entries)} kernel assets in {output}")
-
 

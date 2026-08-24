@@ -33,7 +33,7 @@ class KernelBuilderTests(unittest.TestCase):
 
             digest, size = compress_core(source, target, 6)
 
-            self.assertEqual(digest, hashlib.sha256(content).hexdigest())
+            self.assertEqual(digest, hashlib.sha256(target.read_bytes()).hexdigest())
             self.assertEqual(size, target.stat().st_size)
             with lzma.open(target, "rb") as compressed:
                 self.assertEqual(compressed.read(), content)
