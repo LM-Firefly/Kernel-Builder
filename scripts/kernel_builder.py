@@ -23,7 +23,7 @@ from typing import Any, NoReturn
 
 ROOT = Path(__file__).resolve().parent.parent
 ABI = "arm64-v8a"
-OFFICIAL_CHANNELS = {"alpha", "mate", "smart"}
+OFFICIAL_CHANNELS = {"alpha", "meta", "smart", "ebpf"}
 REQUIRED_ENV = (
     "TEMPLATE_REPOSITORY",
     "TEMPLATE_REF",
@@ -187,9 +187,15 @@ def validate_config(args: argparse.Namespace) -> None:
     if len(set(ids)) != len(ids):
         error("Channel ids must be unique")
     if mode == "official" and set(ids) != OFFICIAL_CHANNELS:
-        error("Official releases must contain exactly alpha, mate, and smart channels")
+        error("Official releases must contain exactly alpha, meta, smart, and ebpf channels")
     if mode == "custom" and not channels:
         error("Custom releases require at least one configured channel")
+    patches = config.get("patches", "")
+    if not isinstance(patches, str) or not patches.startswith("patches/"):
+        error("Invalid shared patch directory")
+    patch_dir = Path(args.config).parent / patches
+    if not patch_dir.is_dir():
+        error(f"Missing patch directory: {patch_dir}")
     for channel in channels:
         if (
             not re.fullmatch(r"[a-z0-9][a-z0-9-]*", channel.get("id", ""))
@@ -198,13 +204,10 @@ def validate_config(args: argparse.Namespace) -> None:
             or not channel.get("ref")
             or re.search(r"\s", channel.get("ref", ""))
             or not isinstance(channel.get("suffix"), str)
-            or not isinstance(channel.get("patches"), str)
-            or not channel["patches"].startswith("patches/")
+            or not isinstance(channel.get("buildTags"), str)
+            or not channel.get("buildTags")
         ):
             error(f"Invalid channel: {channel.get('id')}")
-        patch_dir = Path(args.config).parent / channel.get("patches", "")
-        if not patch_dir.is_dir():
-            error(f"Missing patch directory: {patch_dir}")
 
     repository = os.environ.get("INPUT_KERNEL_REPOSITORY", "")
     ref = os.environ.get("INPUT_KERNEL_REF", "")
@@ -238,6 +241,8 @@ def validate_config(args: argparse.Namespace) -> None:
     else:
         channels = [dict(channel) for channel in channels]
         custom_version = ""
+    for channel in channels:
+        channel["patches"] = patches
 
     tag = values["RELEASE_TAG"]
     if not os.environ.get("INPUT_RELEASE_TAG") and os.environ.get("GITHUB_RUN_ID"):
@@ -525,7 +530,7 @@ def verify_release_directory(directory: Path) -> None:
     if not ids or len(ids) != len(set(ids)):
         error("Release kernel ids must be unique and non-empty")
     if kind == "official" and set(ids) != OFFICIAL_CHANNELS:
-        error("Official releases must contain exactly alpha, mate, and smart kernels")
+        error("Official releases must contain exactly alpha, meta, smart, and ebpf kernels")
     if kind == "custom" and len(ids) != 1:
         error("Custom releases must contain exactly one kernel")
     if manifest.get("defaultKernel") not in ids:
@@ -847,6 +852,7 @@ def parser() -> argparse.ArgumentParser:
     item.add_argument("--abi", default=ABI)
     item.add_argument("--compression-level", default="9")
     item.add_argument("--github-output")
+    item.set_defaults(handler=package_release)
 
     item = commands.add_parser("verify-release")
     item.add_argument("--directory", required=True)

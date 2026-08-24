@@ -56,6 +56,8 @@ jobs:
       release_tag: ${{ steps.config.outputs.release_tag }}
       release_prerelease: ${{ steps.config.outputs.release_prerelease }}
       release_make_latest: ${{ steps.config.outputs.release_make_latest }}
+      release_name: ${{ steps.config.outputs.release_name }}
+      compression_level: ${{ steps.config.outputs.compression_level }}
     steps:
       - uses: actions/checkout@v6
 
@@ -200,6 +202,7 @@ jobs:
           ANDROID_MINSDK: ${{ needs.validate-config.outputs.android_min_sdk }}
           ANDROID_NDKVERSION: >-
             ${{ needs.validate-config.outputs.android_ndk_version }}
+          GOLANG_BUILDTAGS: ${{ matrix.channel.buildTags }}
         run: python3 scripts/native-build.py --go
 
       - name: Record immutable source metadata
