@@ -159,9 +159,17 @@ def validate_config(args: argparse.Namespace) -> None:
     for channel in channels:
         channel["patches"] = patches
 
-    tag = values["RELEASE_TAG"]
-    if not os.environ.get("INPUT_RELEASE_TAG") and os.environ.get("GITHUB_RUN_ID"):
-        tag = f"{tag}-{os.environ['GITHUB_RUN_ID']}"
+    if mode == "official":
+        # The official feed is a stable URL. Every run updates the fixed
+        # `kernel` release instead of creating a new tag that clients cannot
+        # discover from the configured download endpoint.
+        tag = "kernel"
+        release_name = "kernel"
+    else:
+        tag = values["RELEASE_TAG"]
+        if not os.environ.get("INPUT_RELEASE_TAG") and os.environ.get("GITHUB_RUN_ID"):
+            tag = f"{tag}-{os.environ['GITHUB_RUN_ID']}"
+        release_name = values["RELEASE_NAME"]
     if mode == "custom" and not tag:
         error("Custom releases require a release tag")
     if mode == "custom" and not os.environ.get("INPUT_RELEASE_MAKE_LATEST"):
@@ -187,7 +195,7 @@ def validate_config(args: argparse.Namespace) -> None:
             "go_download_base_url": values["GO_DOWNLOAD_BASE_URL"],
             "release_mode": mode,
             "release_tag": tag,
-            "release_name": values["RELEASE_NAME"],
+            "release_name": release_name,
             "release_prerelease": values["RELEASE_PRERELEASE"],
             "release_make_latest": values["RELEASE_MAKE_LATEST"],
             "custom_version": custom_version,
@@ -195,5 +203,4 @@ def validate_config(args: argparse.Namespace) -> None:
         },
     )
     print(f"Validated {args.config} for {ABI} ({mode} release)")
-
 

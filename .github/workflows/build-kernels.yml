@@ -367,7 +367,7 @@ jobs:
           name: ${{ needs.validate-config.outputs.release_name }}
           prerelease: ${{ needs.validate-config.outputs.release_prerelease }}
           make_latest: ${{ needs.validate-config.outputs.release_make_latest }}
-          overwrite_files: false
+          overwrite_files: true
           files: |
             release-assets/publish-assets/*
           fail_on_unmatched_files: true

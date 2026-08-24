@@ -4,12 +4,15 @@ import argparse
 import hashlib
 import json
 import lzma
+import os
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from scripts.kernel_builder import compress_core, fetch_source, release_version
+from scripts.builder.config import validate_config
 
 
 class KernelBuilderTests(unittest.TestCase):
@@ -22,6 +25,24 @@ class KernelBuilderTests(unittest.TestCase):
         commit = "01234567" + "0" * 32
 
         self.assertEqual(release_version("custom", commit, "v1.2.3"), "v1.2.3")
+
+    def test_official_release_name_and_tag_are_fixed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "outputs"
+            with patch.dict(os.environ, {"GITHUB_RUN_ID": "987654321"}, clear=False):
+                validate_config(
+                    argparse.Namespace(
+                        env=".env",
+                        config="kernel-builder.json",
+                        github_output=str(output),
+                    )
+                )
+            values = dict(
+                line.rstrip("\n").split("=", 1)
+                for line in output.read_text(encoding="utf-8").splitlines()
+            )
+            self.assertEqual(values["release_tag"], "kernel")
+            self.assertEqual(values["release_name"], "kernel")
 
     def test_compression_is_streamed_and_reversible(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

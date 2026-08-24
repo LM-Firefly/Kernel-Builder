@@ -2,7 +2,7 @@
 
 Kernel-Builder independently builds and publishes verified Android `arm64-v8a` mihomo kernels for YumeBox.
 
-YumeBox reads the official index from [`latest/download/kernel-index.json`](https://github.com/YumeYucca/Kernel-Builder/releases/latest/download/kernel-index.json), so each official build can use a new immutable Release tag without breaking the APP URL. Official Releases contain only `kernel-index.json` and the four `kernel-*.so.xz` assets; no Release notes or temporary files are uploaded.
+YumeBox reads the official index from the fixed `kernel` Release at [`kernel/download/kernel-index.json`](https://github.com/YumeYucca/Kernel-Builder/releases/download/kernel/kernel-index.json). Official Releases contain only `kernel-index.json` and the four `kernel-*.so.xz` assets; no Release notes or temporary files are uploaded.
 
 The workflow has a manual `workflow_dispatch` trigger with only two inputs: `release_mode` and `kernel_repository`. Official mode ignores the repository input and builds the configured `alpha`, `meta`, `smart`, and `ebpf` channels. Custom mode uses the submitted repository URL with the configured branch and patch set, builds one channel named `custom`, and derives its version and unique Release tag automatically. The custom Release publishes only `kernel-plugin.zip`; after extraction it contains the same `kernel-index.json` and verified kernel archive format as an official build.
 
