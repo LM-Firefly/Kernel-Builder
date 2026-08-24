@@ -616,11 +616,7 @@ def package_release(args: argparse.Namespace) -> None:
         properties = read_properties(source_dir / "core-version.properties")
         source = read_json(source_dir / "source.json")
         core_commit = properties.get("core.commit", "")
-        version = (
-            args.version_override
-            if kind == "custom"
-            else properties.get("core.displayVersion", "")
-        )
+        version = args.version_override or properties.get("core.displayVersion", "")
         source_commit = source.get("commit", "")
         template_commit = source.get("templateCommit", "")
         if not re.fullmatch(r"[0-9a-f]{7,40}", core_commit) or not version:
