@@ -1,6 +1,7 @@
 {
   "schemaVersion": 1,
   "shellAbi": 1,
+  "defaultKernel": "alpha",
   "abis": ["arm64-v8a"],
   "template": {
     "repository": "YumeYucca/YumeBox",
@@ -16,8 +17,8 @@
       "patches": "patches/alpha"
     },
     {
-      "id": "meta",
-      "name": "Mihomo Meta",
+      "id": "mate",
+      "name": "Mihomo Mate",
       "repository": "https://github.com/MetaCubeX/mihomo.git",
       "ref": "Meta",
       "suffix": "",

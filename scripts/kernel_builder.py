@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import datetime
 import hashlib
+import http.client
 import json
 import lzma
 import os
@@ -16,22 +17,32 @@ import subprocess
 import sys
 import urllib.parse
 import urllib.request
+import zipfile
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 ROOT = Path(__file__).resolve().parent.parent
 ABI = "arm64-v8a"
-CHANNELS = ["alpha", "meta", "smart"]
+OFFICIAL_CHANNELS = {"alpha", "mate", "smart"}
 REQUIRED_ENV = (
-    "TEMPLATE_REPOSITORY", "TEMPLATE_REF", "ANDROID_NDK_VERSION",
-    "ANDROID_MIN_SDK", "ANDROID_ABI", "JAVA_VERSION", "GO_VERSION",
-    "GO_DOWNLOAD_BASE_URL", "RELEASE_TAG", "RELEASE_NAME",
-    "RELEASE_PRERELEASE", "RELEASE_MAKE_LATEST", "COMPRESSION",
+    "TEMPLATE_REPOSITORY",
+    "TEMPLATE_REF",
+    "ANDROID_NDK_VERSION",
+    "ANDROID_MIN_SDK",
+    "ANDROID_ABI",
+    "JAVA_VERSION",
+    "GO_VERSION",
+    "GO_DOWNLOAD_BASE_URL",
+    "RELEASE_TAG",
+    "RELEASE_NAME",
+    "RELEASE_PRERELEASE",
+    "RELEASE_MAKE_LATEST",
+    "COMPRESSION",
     "COMPRESSION_LEVEL",
 )
 
 
-def error(message: str) -> None:
+def error(message: str) -> NoReturn:
     raise RuntimeError(message)
 
 
@@ -51,7 +62,9 @@ def command(args: list[str], cwd: Path | None = None, capture: bool = False) -> 
     if result.returncode:
         detail = redact_credentials((result.stderr or result.stdout or "").strip())
         display_args = [redact_credentials(arg) for arg in args]
-        error(f"Command failed ({result.returncode}): {' '.join(display_args)}\n{detail}")
+        error(
+            f"Command failed ({result.returncode}): {' '.join(display_args)}\n{detail}"
+        )
     return (result.stdout or "").strip()
 
 
@@ -67,7 +80,9 @@ def read_json(path: Path) -> dict[str, Any]:
 
 def write_json(path: Path, value: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(value, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    path.write_text(
+        json.dumps(value, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
 
 
 def read_dotenv(path: Path) -> dict[str, str]:
@@ -115,6 +130,10 @@ def validate_config(args: argparse.Namespace) -> None:
         "ANDROID_NDK_VERSION": "INPUT_ANDROID_NDK_VERSION",
         "ANDROID_MIN_SDK": "INPUT_ANDROID_MIN_SDK",
         "JAVA_VERSION": "INPUT_JAVA_VERSION",
+        "RELEASE_TAG": "INPUT_RELEASE_TAG",
+        "RELEASE_NAME": "INPUT_RELEASE_NAME",
+        "RELEASE_PRERELEASE": "INPUT_RELEASE_PRERELEASE",
+        "RELEASE_MAKE_LATEST": "INPUT_RELEASE_MAKE_LATEST",
     }
     for key, input_name in overrides.items():
         if os.environ.get(input_name):
@@ -126,8 +145,6 @@ def validate_config(args: argparse.Namespace) -> None:
         error(f"Only ANDROID_ABI={ABI} is supported")
     if values["COMPRESSION"] != "xz":
         error("Only COMPRESSION=xz is supported")
-    if values["RELEASE_TAG"] != "kernel":
-        error("RELEASE_TAG must be kernel")
     if values["RELEASE_PRERELEASE"] not in {"true", "false"}:
         error("RELEASE_PRERELEASE must be true or false")
     if values["RELEASE_MAKE_LATEST"] not in {"true", "false"}:
@@ -136,9 +153,9 @@ def validate_config(args: argparse.Namespace) -> None:
         error("RELEASE_PRERELEASE and RELEASE_MAKE_LATEST cannot both be true")
     if not re.fullmatch(r"[0-9]", values["COMPRESSION_LEVEL"]):
         error("COMPRESSION_LEVEL must be a digit from 0 to 9")
-    if not re.fullmatch(r"[A-Za-z0-9._-]+", values["RELEASE_TAG"]):
-        error(f"Invalid release tag: {values['RELEASE_TAG']}")
-    if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", values["TEMPLATE_REPOSITORY"]):
+    if not re.fullmatch(
+        r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", values["TEMPLATE_REPOSITORY"]
+    ):
         error(f"Invalid template repository: {values['TEMPLATE_REPOSITORY']}")
     if not values["TEMPLATE_REF"] or re.search(r"\s", values["TEMPLATE_REF"]):
         error("TEMPLATE_REF must be non-empty and contain no whitespace")
@@ -151,6 +168,10 @@ def validate_config(args: argparse.Namespace) -> None:
     if not values["GO_DOWNLOAD_BASE_URL"].startswith("https://"):
         error("GO_DOWNLOAD_BASE_URL must use HTTPS")
 
+    mode = os.environ.get("INPUT_RELEASE_MODE", "official") or "official"
+    if mode not in {"official", "custom"}:
+        error("RELEASE_MODE must be official or custom")
+
     config = read_json(Path(args.config))
     if (
         config.get("schemaVersion") != 1
@@ -160,8 +181,15 @@ def validate_config(args: argparse.Namespace) -> None:
     ):
         error("Invalid kernel-builder.json schema, shell ABI, or target ABI")
     channels = config.get("channels", [])
-    if sorted(channel.get("id") for channel in channels) != CHANNELS:
-        error("kernel-builder.json must contain alpha, meta, and smart channels")
+    if not isinstance(channels, list) or not channels:
+        error("kernel-builder.json must contain at least one channel")
+    ids = [channel.get("id") for channel in channels]
+    if len(set(ids)) != len(ids):
+        error("Channel ids must be unique")
+    if mode == "official" and set(ids) != OFFICIAL_CHANNELS:
+        error("Official releases must contain exactly alpha, mate, and smart channels")
+    if mode == "custom" and not channels:
+        error("Custom releases require at least one configured channel")
     for channel in channels:
         if (
             not re.fullmatch(r"[a-z0-9][a-z0-9-]*", channel.get("id", ""))
@@ -180,35 +208,80 @@ def validate_config(args: argparse.Namespace) -> None:
 
     repository = os.environ.get("INPUT_KERNEL_REPOSITORY", "")
     ref = os.environ.get("INPUT_KERNEL_REF", "")
+    custom_repository = os.environ.get("INPUT_CUSTOM_KERNEL_REPOSITORY", "")
+    custom_ref = os.environ.get("INPUT_CUSTOM_KERNEL_REF", "")
     if repository and not re.match(r"^(https://|git@).+", repository):
         error(f"Invalid kernel repository override: {repository}")
+    if custom_repository and not re.match(r"^(https://|git@).+", custom_repository):
+        error(f"Invalid custom kernel repository: {custom_repository}")
     if ref and re.search(r"\s", ref):
         error("Kernel ref override cannot contain whitespace")
-    matrix = []
-    for channel in channels:
-        item = dict(channel)
-        if repository:
-            item["repository"] = repository
-        if ref:
-            item["ref"] = ref
-        matrix.append(item)
-    write_outputs(Path(args.github_output), {
-        "matrix": matrix,
-        "template_repository": values["TEMPLATE_REPOSITORY"],
-        "template_ref": values["TEMPLATE_REF"],
-        "android_ndk_version": values["ANDROID_NDK_VERSION"],
-        "android_min_sdk": values["ANDROID_MIN_SDK"],
-        "android_abi": values["ANDROID_ABI"],
-        "java_version": values["JAVA_VERSION"],
-        "go_version": values["GO_VERSION"],
-        "go_download_base_url": values["GO_DOWNLOAD_BASE_URL"],
-        "release_tag": values["RELEASE_TAG"],
-        "release_name": values["RELEASE_NAME"],
-        "release_prerelease": values["RELEASE_PRERELEASE"],
-        "release_make_latest": values["RELEASE_MAKE_LATEST"],
-        "compression_level": values["COMPRESSION_LEVEL"],
-    })
-    print(f"Validated {args.config} for {ABI}")
+    if custom_ref and re.search(r"\s", custom_ref):
+        error("Custom kernel ref cannot contain whitespace")
+
+    if mode == "custom":
+        item = dict(channels[0])
+        item["id"] = os.environ.get("INPUT_CUSTOM_CHANNEL_ID", "") or item["id"]
+        item["name"] = os.environ.get("INPUT_CUSTOM_CHANNEL_NAME", "") or item["name"]
+        item["repository"] = custom_repository or repository or item["repository"]
+        item["ref"] = custom_ref or ref or item["ref"]
+        if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", item["id"]):
+            error(f"Invalid custom channel id: {item['id']}")
+        if not item["name"]:
+            error("Custom channel name must be non-empty")
+        custom_version = os.environ.get("INPUT_CUSTOM_VERSION", "")
+        if not custom_version or re.search(r"\s", custom_version):
+            error("Custom releases require custom_version without whitespace")
+        channels = [item]
+    else:
+        channels = [dict(channel) for channel in channels]
+        for item in channels:
+            if repository:
+                item["repository"] = repository
+            if ref:
+                item["ref"] = ref
+        custom_version = ""
+
+    tag = values["RELEASE_TAG"]
+    if (
+        mode == "official"
+        and not os.environ.get("INPUT_RELEASE_TAG")
+        and os.environ.get("GITHUB_RUN_ID")
+    ):
+        tag = f"{tag}-{os.environ['GITHUB_RUN_ID']}"
+    if mode == "custom" and not tag:
+        error("Custom releases require release_tag in .env or workflow input")
+    if mode == "custom" and not os.environ.get("INPUT_RELEASE_MAKE_LATEST"):
+        values["RELEASE_MAKE_LATEST"] = "false"
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", tag):
+        error(f"Invalid release tag: {tag}")
+    default_kernel = config.get("defaultKernel", "alpha")
+    if mode == "custom":
+        default_kernel = channels[0]["id"]
+    elif default_kernel not in {item["id"] for item in channels}:
+        error(f"Configured default kernel is not present: {default_kernel}")
+    write_outputs(
+        Path(args.github_output),
+        {
+            "matrix": channels,
+            "template_repository": values["TEMPLATE_REPOSITORY"],
+            "template_ref": values["TEMPLATE_REF"],
+            "android_ndk_version": values["ANDROID_NDK_VERSION"],
+            "android_min_sdk": values["ANDROID_MIN_SDK"],
+            "android_abi": values["ANDROID_ABI"],
+            "java_version": values["JAVA_VERSION"],
+            "go_version": values["GO_VERSION"],
+            "go_download_base_url": values["GO_DOWNLOAD_BASE_URL"],
+            "release_mode": mode,
+            "release_tag": tag,
+            "release_name": values["RELEASE_NAME"],
+            "release_prerelease": values["RELEASE_PRERELEASE"],
+            "release_make_latest": values["RELEASE_MAKE_LATEST"],
+            "custom_version": custom_version,
+            "compression_level": values["COMPRESSION_LEVEL"],
+        },
+    )
+    print(f"Validated {args.config} for {ABI} ({mode} release)")
 
 
 def authenticated_url(repository: str, token: str) -> str:
@@ -227,20 +300,26 @@ def detect_upstream(args: argparse.Namespace) -> None:
     commit = rows[0].split()[0]
     if not re.fullmatch(r"[0-9a-f]{40}", commit):
         error(f"Invalid upstream commit: {commit}")
-    write_json(Path(args.output), {
-        "id": args.channel_id,
-        "repository": args.repository,
-        "ref": args.ref,
-        "commit": commit,
-    })
+    write_json(
+        Path(args.output),
+        {
+            "id": args.channel_id,
+            "repository": args.repository,
+            "ref": args.ref,
+            "commit": commit,
+        },
+    )
 
 
 def verify_native_source(args: argparse.Namespace) -> None:
     root = Path(args.root)
     required = (
-        "scripts/native-build.py", "scripts/native/cli.py",
-        "lib/native/go/native/entry.go", "lib/native/go/go.mod",
-        "lib/native/shell/CMakeLists.txt", "lib/native/shell/shell.c",
+        "scripts/native-build.py",
+        "scripts/native/cli.py",
+        "lib/native/go/native/entry.go",
+        "lib/native/go/go.mod",
+        "lib/native/shell/CMakeLists.txt",
+        "lib/native/shell/shell.c",
         "kernel.properties",
     )
     for relative in required:
@@ -257,11 +336,23 @@ def configure_template(args: argparse.Namespace) -> None:
 
 def fetch_source(args: argparse.Namespace) -> None:
     target = Path(args.root, "lib/mihomo/mihomo")
-    if target.exists():
+    try:
         shutil.rmtree(target)
+    except OSError as exc:
+        error(f"Unable to remove existing source tree {target}: {exc}")
     target.mkdir(parents=True)
     command(["git", "-C", str(target), "init", "--quiet"])
-    command(["git", "-C", str(target), "remote", "add", "origin", authenticated_url(args.repository, args.token)])
+    command(
+        [
+            "git",
+            "-C",
+            str(target),
+            "remote",
+            "add",
+            "origin",
+            authenticated_url(args.repository, args.token),
+        ]
+    )
     command(["git", "-C", str(target), "fetch", "--depth=1", "origin", args.ref])
     command(["git", "-C", str(target), "checkout", "--detach", "--quiet", "FETCH_HEAD"])
     actual = command(["git", "-C", str(target), "rev-parse", "HEAD"], capture=True)
@@ -285,27 +376,39 @@ def apply_patches(args: argparse.Namespace) -> None:
 
 def resolve_go_dependencies(args: argparse.Namespace) -> None:
     module_dir = Path(args.root, "lib/native/go")
-    graph = json.loads(command(["go", "mod", "edit", "-json"], module_dir, capture=True))
+    try:
+        graph = json.loads(
+            command(["go", "mod", "edit", "-json"], module_dir, capture=True)
+        )
+    except (OSError, RuntimeError, ValueError) as exc:
+        error(f"Unable to inspect Go dependencies: {exc}")
     for requirement in graph.get("Require", []):
         if requirement.get("Indirect"):
-            command(["go", "mod", "edit", f"-droprequire={requirement['Path']}"], module_dir)
+            command(
+                ["go", "mod", "edit", f"-droprequire={requirement['Path']}"], module_dir
+            )
     command(["go", "mod", "tidy"], module_dir)
 
 
 def record_metadata(args: argparse.Namespace) -> None:
     root = Path(args.root)
     source_dir = root / "lib/mihomo/mihomo"
-    source_commit = command(["git", "-C", str(source_dir), "rev-parse", "HEAD"], capture=True)
+    source_commit = command(
+        ["git", "-C", str(source_dir), "rev-parse", "HEAD"], capture=True
+    )
     expected = read_json(Path(args.expected))["commit"]
     if source_commit != expected:
         error(f"Kernel commit mismatch: {source_commit} != {expected}")
     template_commit = command(["git", "rev-parse", "HEAD"], root, capture=True)
-    write_json(root / "jniLibs" / args.abi / "source.json", {
-        "repository": args.repository,
-        "ref": args.ref,
-        "commit": source_commit,
-        "templateCommit": template_commit,
-    })
+    write_json(
+        root / "jniLibs" / args.abi / "source.json",
+        {
+            "repository": args.repository,
+            "ref": args.ref,
+            "commit": source_commit,
+            "templateCommit": template_commit,
+        },
+    )
 
 
 def copy_artifact(args: argparse.Namespace) -> None:
@@ -324,7 +427,10 @@ def stage_verified_artifact(args: argparse.Namespace) -> None:
     candidates = []
     for core in root.rglob("libmihomocore.so"):
         parts = core.parts
-        if any(parts[index:index + 2] == (args.channel, args.abi) for index in range(len(parts) - 1)):
+        if any(
+            parts[index : index + 2] == (args.channel, args.abi)
+            for index in range(len(parts) - 1)
+        ):
             candidates.append(core.parent)
     if len(candidates) != 1:
         error(f"Expected one core for {args.channel}, found {len(candidates)}")
@@ -366,7 +472,7 @@ def valid_arm64_core(path: Path) -> bool:
         if section_type not in (2, 11) or not entry_size or link >= len(sections):
             continue
         _, strings_offset, strings_size, _, _ = sections[link]
-        strings = data[strings_offset:strings_offset + strings_size]
+        strings = data[strings_offset : strings_offset + strings_size]
         for index in range(data_size // entry_size):
             symbol_offset = data_offset + index * entry_size
             if symbol_offset + 4 > len(data):
@@ -400,7 +506,10 @@ def locate_core(root: Path, channel: str, abi: str) -> Path:
     candidates = []
     for path in root.rglob("libmihomocore.so"):
         parts = path.parts
-        if any(parts[index:index + 2] == (channel, abi) for index in range(len(parts) - 1)):
+        if any(
+            parts[index : index + 2] == (channel, abi)
+            for index in range(len(parts) - 1)
+        ):
             candidates.append(path)
     if len(candidates) != 1:
         error(f"Expected one verified core for {channel}, found {len(candidates)}")
@@ -408,26 +517,39 @@ def locate_core(root: Path, channel: str, abi: str) -> Path:
 
 
 def verify_release_directory(directory: Path) -> None:
-    manifest_path = directory / "kernel-index.json"
-    manifest = read_json(manifest_path)
-    if manifest.get("schemaVersion") != 3:
-        error("Unsupported kernel index schema")
-    if manifest.get("defaultKernel") != "alpha" or manifest.get("abi") != ABI:
-        error("Invalid default kernel or ABI")
+    manifest = read_json(directory / "kernel-index.json")
+    release = manifest.get("release", {})
+    kind = release.get("kind", "official")
+    if (
+        manifest.get("schemaVersion") != 3
+        or manifest.get("abi") != ABI
+        or kind not in {"official", "custom"}
+    ):
+        error("Unsupported kernel index schema, ABI, or release kind")
     kernels = manifest.get("kernels", [])
-    if sorted(kernel.get("id") for kernel in kernels) != CHANNELS:
-        error("Release must contain alpha, meta, and smart kernels")
-    expected_assets = {f"kernel-{channel}.so.xz" for channel in CHANNELS}
+    ids = [kernel.get("id") for kernel in kernels]
+    if not ids or len(ids) != len(set(ids)):
+        error("Release kernel ids must be unique and non-empty")
+    if kind == "official" and set(ids) != OFFICIAL_CHANNELS:
+        error("Official releases must contain exactly alpha, mate, and smart kernels")
+    if kind == "custom" and len(ids) != 1:
+        error("Custom releases must contain exactly one kernel")
+    if manifest.get("defaultKernel") not in ids:
+        error("Invalid default kernel")
+    expected_assets = {f"kernel-{channel}.so.xz" for channel in ids}
     for kernel in kernels:
         commit = kernel.get("commit", "")
         if not re.fullmatch(r"[0-9a-f]{40}", commit):
             error(f"Invalid commit for {kernel.get('id')}")
-        if kernel.get("version") != f"{kernel['id']}-{commit[:8]}":
+        if (
+            kind == "official"
+            and kernel.get("version") != f"{kernel['id']}-{commit[:8]}"
+        ):
             error(f"Invalid version for {kernel.get('id')}: {kernel.get('version')}")
         if (
             not kernel.get("name")
             or kernel.get("abi") != ABI
-            or not str(kernel.get("asset", "")).endswith(".so.xz")
+            or kernel.get("asset") not in expected_assets
             or kernel.get("compression") != "xz"
             or not str(kernel.get("downloadUrl", "")).startswith("https://")
             or not re.fullmatch(r"[0-9a-f]{64}", kernel.get("sha256", ""))
@@ -445,10 +567,31 @@ def verify_release_directory(directory: Path) -> None:
         if asset_name not in expected_assets or not asset.is_file():
             error(f"Missing or unexpected asset: {asset}")
         digest = hashlib.sha256(asset.read_bytes()).hexdigest()
-        if digest != kernel.get("sha256") or asset.stat().st_size != kernel.get("sizeBytes"):
+        if digest != kernel.get("sha256") or asset.stat().st_size != kernel.get(
+            "sizeBytes"
+        ):
             error(f"Checksum or size mismatch: {asset}")
         with lzma.open(asset, "rb") as compressed:
             compressed.read(1)
+    if kind == "custom":
+        plugin = release.get("plugin", {})
+        plugin_path = directory / plugin.get("asset", "")
+        if plugin.get("asset") != "kernel-plugin.zip" or not plugin_path.is_file():
+            error("Custom release must contain kernel-plugin.zip")
+        try:
+            with zipfile.ZipFile(plugin_path) as archive:
+                if set(archive.namelist()) != {"kernel-index.json", *expected_assets}:
+                    error("Custom plugin contains unexpected files")
+                if json.loads(archive.read("kernel-index.json")) != manifest:
+                    error("Custom plugin manifest does not match release manifest")
+                for asset_name in expected_assets:
+                    if (
+                        archive.read(asset_name)
+                        != (directory / asset_name).read_bytes()
+                    ):
+                        error(f"Custom plugin asset mismatch: {asset_name}")
+        except (OSError, zipfile.BadZipFile, KeyError, json.JSONDecodeError) as exc:
+            error(f"Invalid custom plugin: {exc}")
     print(f"Verified release assets in {directory}")
 
 
@@ -457,63 +600,97 @@ def package_release(args: argparse.Namespace) -> None:
     output = Path(args.output)
     output.mkdir(parents=True, exist_ok=True)
     config = read_json(ROOT / "kernel-builder.json")
-    preset = int(args.compression_level) | lzma.PRESET_EXTREME
+    try:
+        compression_level = int(args.compression_level)
+        preset = compression_level | lzma.PRESET_EXTREME
+        channels = json.loads(args.channels_json)
+    except (ValueError, json.JSONDecodeError) as exc:
+        error(f"Invalid release packaging input: {exc}")
+    kind = args.release_mode
+    if (
+        kind not in {"official", "custom"}
+        or not isinstance(channels, list)
+        or not channels
+    ):
+        error("Invalid release packaging mode or channel matrix")
+    plugin_url = f"https://github.com/{args.release_repository}/releases/download/{args.release_tag}/kernel-plugin.zip"
     entries = []
-    for channel in config["channels"]:
+    for channel in channels:
         channel_id = channel["id"]
         core = locate_core(root, channel_id, args.abi)
         source_dir = core.parent
         properties = read_properties(source_dir / "core-version.properties")
         source = read_json(source_dir / "source.json")
         core_commit = properties.get("core.commit", "")
-        version = properties.get("core.displayVersion", "")
+        version = (
+            args.version_override
+            if kind == "custom"
+            else properties.get("core.displayVersion", "")
+        )
         source_commit = source.get("commit", "")
         template_commit = source.get("templateCommit", "")
         if not re.fullmatch(r"[0-9a-f]{7,40}", core_commit) or not version:
             error(f"Invalid core version metadata: {source_dir}")
-        if not re.fullmatch(r"[0-9a-f]{40}", source_commit):
+        if not re.fullmatch(
+            r"[0-9a-f]{40}", source_commit
+        ) or not source_commit.startswith(core_commit):
             error(f"Invalid source commit: {source_dir}")
-        if not source_commit.startswith(core_commit):
-            error(f"Source commit does not match core commit: {source_dir}")
         if not re.fullmatch(r"[0-9a-f]{40}", template_commit):
             error(f"Invalid template commit: {source_dir}")
         asset_name = f"kernel-{channel_id}.so.xz"
         asset = output / asset_name
-        with core.open("rb") as source_file:
-            with lzma.open(asset, "wb", format=lzma.FORMAT_XZ, preset=preset) as compressed:
-                shutil.copyfileobj(source_file, compressed)
-        entries.append({
-            "id": channel_id,
-            "name": channel["name"],
-            "version": version,
-            "commit": source_commit,
-            "abi": args.abi,
-            "shellAbi": config["shellAbi"],
-            "asset": asset_name,
-            "downloadUrl": (
-                f"https://github.com/{args.release_repository}/releases/download/"
-                f"{args.release_tag}/{asset_name}"
-            ),
-            "sha256": hashlib.sha256(asset.read_bytes()).hexdigest(),
-            "sizeBytes": asset.stat().st_size,
-            "compression": "xz",
-            "sourceRepository": source["repository"],
-            "sourceRef": source["ref"],
-            "sourceCommit": source_commit,
-            "templateCommit": template_commit,
-        })
+        with (
+            core.open("rb") as source_file,
+            lzma.open(asset, "wb", format=lzma.FORMAT_XZ, preset=preset) as compressed,
+        ):
+            shutil.copyfileobj(source_file, compressed)
+        entries.append(
+            {
+                "id": channel_id,
+                "name": channel["name"],
+                "version": version,
+                "commit": source_commit,
+                "abi": args.abi,
+                "shellAbi": config["shellAbi"],
+                "asset": asset_name,
+                "downloadUrl": plugin_url
+                if kind == "custom"
+                else f"https://github.com/{args.release_repository}/releases/download/{args.release_tag}/{asset_name}",
+                "sha256": hashlib.sha256(asset.read_bytes()).hexdigest(),
+                "sizeBytes": asset.stat().st_size,
+                "compression": "xz",
+                "sourceRepository": source["repository"],
+                "sourceRef": source["ref"],
+                "sourceCommit": source_commit,
+                "templateCommit": template_commit,
+            }
+        )
     manifest = {
         "schemaVersion": 3,
         "generatedAt": args.generated_at,
         "release": {
+            "kind": kind,
             "tag": args.release_tag,
             "url": f"https://github.com/{args.release_repository}/releases/tag/{args.release_tag}",
-            "manifestUrl": (
-                f"https://github.com/{args.release_repository}/releases/download/"
-                f"{args.release_tag}/kernel-index.json"
+            "manifestUrl": plugin_url
+            if kind == "custom"
+            else f"https://github.com/{args.release_repository}/releases/download/{args.release_tag}/kernel-index.json",
+            **(
+                {"plugin": {"asset": "kernel-plugin.zip", "downloadUrl": plugin_url}}
+                if kind == "custom"
+                else {}
             ),
         },
-        "defaultKernel": "alpha",
+        "builder": {
+            "repository": args.builder_repository,
+            "workflow": args.builder_workflow,
+            "runId": args.builder_run_id,
+            "commit": args.builder_sha,
+            "format": "kernel-plugin-v1" if kind == "custom" else "kernel-release-v1",
+        },
+        "defaultKernel": channels[0]["id"]
+        if kind == "custom"
+        else config.get("defaultKernel", "alpha"),
         "abi": args.abi,
         "shellAbi": config["shellAbi"],
         "template": {"repository": args.template_repository, "ref": args.template_ref},
@@ -521,13 +698,19 @@ def package_release(args: argparse.Namespace) -> None:
             "go": args.go_version,
             "ndk": args.ndk_version,
             "compression": "xz",
-            "compressionLevel": int(args.compression_level),
+            "compressionLevel": compression_level,
         },
         "kernels": entries,
     }
     write_json(output / "kernel-index.json", manifest)
+    if kind == "custom":
+        with zipfile.ZipFile(
+            output / "kernel-plugin.zip", "w", compression=zipfile.ZIP_STORED
+        ) as archive:
+            archive.write(output / "kernel-index.json", "kernel-index.json")
+            for entry in entries:
+                archive.write(output / entry["asset"], entry["asset"])
     verify_release_directory(output)
-    (output / "RELEASE_NOTES.md").write_text(f"{args.generated_at}\n", encoding="utf-8")
     if args.github_output:
         write_outputs(Path(args.github_output), {"release_tag": args.release_tag})
     print(f"Packaged {len(entries)} kernel assets in {output}")
@@ -537,20 +720,32 @@ def notify_telegram(args: argparse.Namespace) -> None:
     if not args.bot_token or not args.chat_id:
         print("Telegram notification skipped: BOT_TOKEN and CHAT_ID are required.")
         return
-    release_url = f"https://github.com/{args.repository}/releases/tag/{args.release_tag}"
-    data = urllib.parse.urlencode({
-        "chat_id": args.chat_id,
-        "disable_web_page_preview": "true",
-        "text": f"{args.release_name}\nTag: {args.release_tag}\nRelease: {release_url}",
-    }).encode()
-    request = urllib.request.Request(
-        f"https://api.telegram.org/bot{args.bot_token}/sendMessage",
-        data=data,
-        method="POST",
+    release_url = (
+        f"https://github.com/{args.repository}/releases/tag/{args.release_tag}"
     )
-    with urllib.request.urlopen(request, timeout=30) as response:
+    data = urllib.parse.urlencode(
+        {
+            "chat_id": args.chat_id,
+            "disable_web_page_preview": "true",
+            "text": f"{args.release_name}\nTag: {args.release_tag}\nRelease: {release_url}",
+        }
+    ).encode()
+    endpoint = f"/bot{args.bot_token}/sendMessage"
+    connection = http.client.HTTPSConnection("api.telegram.org", timeout=30)
+    try:
+        connection.request(
+            "POST",
+            endpoint,
+            body=data,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        response = connection.getresponse()
         if not 200 <= response.status < 300:
             error(f"Telegram request failed: HTTP {response.status}")
+    except OSError as exc:
+        error(f"Telegram request failed: {exc}")
+    finally:
+        connection.close()
 
 
 def parser() -> argparse.ArgumentParser:
@@ -629,9 +824,18 @@ def parser() -> argparse.ArgumentParser:
     item.add_argument("--release-tag", required=True)
     item.add_argument(
         "--generated-at",
-        default=datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        default=datetime.datetime.now(datetime.timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        ),
     )
     item.add_argument("--release-repository", required=True)
+    item.add_argument("--release-mode", choices=("official", "custom"), required=True)
+    item.add_argument("--channels-json", required=True)
+    item.add_argument("--version-override", default="")
+    item.add_argument("--builder-repository", required=True)
+    item.add_argument("--builder-workflow", required=True)
+    item.add_argument("--builder-run-id", required=True)
+    item.add_argument("--builder-sha", required=True)
     item.add_argument("--template-repository", required=True)
     item.add_argument("--template-ref", required=True)
     item.add_argument("--go-version", required=True)
@@ -639,11 +843,12 @@ def parser() -> argparse.ArgumentParser:
     item.add_argument("--abi", default=ABI)
     item.add_argument("--compression-level", default="9")
     item.add_argument("--github-output")
-    item.set_defaults(handler=package_release)
 
     item = commands.add_parser("verify-release")
     item.add_argument("--directory", required=True)
-    item.set_defaults(handler=lambda args: verify_release_directory(Path(args.directory)))
+    item.set_defaults(
+        handler=lambda args: verify_release_directory(Path(args.directory))
+    )
 
     item = commands.add_parser("notify-telegram")
     item.add_argument("--bot-token", default=os.environ.get("BOT_TOKEN", ""))

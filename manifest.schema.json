@@ -3,23 +3,46 @@
   "title": "YumeBox Kernel Index",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "generatedAt", "release", "defaultKernel", "abi", "shellAbi", "template", "toolchain", "kernels"],
+  "required": ["schemaVersion", "generatedAt", "release", "builder", "defaultKernel", "abi", "shellAbi", "template", "toolchain", "kernels"],
   "properties": {
     "schemaVersion": { "const": 3 },
     "generatedAt": { "type": "string", "format": "date-time" },
     "release": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["tag", "url", "manifestUrl"],
+      "required": ["kind", "tag", "url", "manifestUrl"],
       "properties": {
+        "kind": { "enum": ["official", "custom"] },
         "tag": { "type": "string", "minLength": 1 },
         "url": { "type": "string", "format": "uri" },
-        "manifestUrl": { "type": "string", "format": "uri" }
+        "manifestUrl": { "type": "string", "format": "uri" },
+        "plugin": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["asset", "downloadUrl"],
+          "properties": {
+            "asset": { "const": "kernel-plugin.zip" },
+            "downloadUrl": { "type": "string", "format": "uri" }
+          }
+        }
       }
     },
-    "defaultKernel": { "const": "alpha" },
+    "builder": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "workflow", "runId", "commit", "format"],
+      "properties": {
+        "repository": { "type": "string", "minLength": 1 },
+        "workflow": { "type": "string", "minLength": 1 },
+        "runId": { "type": "string", "minLength": 1 },
+        "commit": { "type": "string", "minLength": 1 },
+        "format": { "enum": ["kernel-release-v1", "kernel-plugin-v1"] }
+      }
+    "defaultKernel": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
     "shellAbi": { "type": "integer", "minimum": 1 },
-    "abi": { "const": "arm64-v8a" },
     "template": {
       "type": "object",
       "additionalProperties": false,
@@ -42,7 +65,7 @@
     },
     "kernels": {
       "type": "array",
-      "minItems": 3,
+      "minItems": 1,
       "maxItems": 3,
       "uniqueItems": true,
       "items": {
@@ -50,13 +73,13 @@
         "additionalProperties": false,
         "required": ["id", "name", "version", "commit", "abi", "shellAbi", "asset", "downloadUrl", "sha256", "sizeBytes", "compression", "sourceRepository", "sourceRef", "sourceCommit", "templateCommit"],
         "properties": {
-          "id": { "enum": ["alpha", "meta", "smart"] },
+          "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
           "name": { "type": "string", "minLength": 1 },
           "version": { "type": "string", "minLength": 1 },
           "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
           "abi": { "const": "arm64-v8a" },
           "shellAbi": { "type": "integer", "minimum": 1 },
-          "asset": { "type": "string", "pattern": "^kernel-(alpha|meta|smart)\\.so\\.xz$" },
+          "asset": { "type": "string", "pattern": "^kernel-[a-z0-9][a-z0-9-]*\\.so\\.xz$" },
           "downloadUrl": { "type": "string", "format": "uri" },
           "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
           "sizeBytes": { "type": "integer", "minimum": 1 },
