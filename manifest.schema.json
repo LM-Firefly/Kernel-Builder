@@ -73,7 +73,7 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "name", "version", "commit", "abi", "shellAbi", "asset", "downloadUrl", "sha256", "sizeBytes", "compression", "sourceRepository", "sourceRef", "sourceCommit", "templateCommit"],
+        "required": ["id", "name", "version", "commit", "abi", "shellAbi", "asset", "downloadUrl", "sha256", "sizeBytes", "compression", "capabilities", "sourceRepository", "sourceRef", "sourceCommit", "templateCommit"],
         "properties": {
           "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
           "name": { "type": "string", "minLength": 1 },
@@ -86,6 +86,11 @@
           "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
           "sizeBytes": { "type": "integer", "minimum": 1 },
           "compression": { "const": "xz" },
+          "capabilities": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" }
+          },
           "sourceRepository": { "type": "string", "minLength": 1 },
           "sourceRef": { "type": "string", "minLength": 1 },
           "sourceCommit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },

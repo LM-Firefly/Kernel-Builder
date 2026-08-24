@@ -15,7 +15,8 @@
       "repository": "https://github.com/MetaCubeX/mihomo.git",
       "ref": "Alpha",
       "suffix": "",
-      "buildTags": "foss,with_gvisor,cmfa"
+      "buildTags": "foss,with_gvisor,cmfa",
+      "capabilities": []
     },
     {
       "id": "meta",
@@ -23,7 +24,8 @@
       "repository": "https://github.com/MetaCubeX/mihomo.git",
       "ref": "Meta",
       "suffix": "",
-      "buildTags": "foss,with_gvisor,cmfa"
+      "buildTags": "foss,with_gvisor,cmfa",
+      "capabilities": []
     },
     {
       "id": "smart",
@@ -31,15 +33,17 @@
       "repository": "https://github.com/vernesong/mihomo.git",
       "ref": "Alpha",
       "suffix": "",
-      "buildTags": "foss,with_gvisor,cmfa"
+      "buildTags": "foss,with_gvisor,cmfa",
+      "capabilities": []
     },
     {
       "id": "ebpf",
       "name": "Mihomo eBPF",
       "repository": "https://github.com/liuran001/mihomo.git",
       "ref": "Alpha",
-      "suffix": "-ebpf",
-      "buildTags": "foss,with_gvisor,cmfa,with_ebpf"
+      "suffix": "",
+      "buildTags": "foss,with_gvisor,cmfa,with_ebpf",
+      "capabilities": ["ebpf"]
     }
   ]
 }

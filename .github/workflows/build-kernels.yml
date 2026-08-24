@@ -57,6 +57,7 @@ jobs:
       release_prerelease: ${{ steps.config.outputs.release_prerelease }}
       release_make_latest: ${{ steps.config.outputs.release_make_latest }}
       release_name: ${{ steps.config.outputs.release_name }}
+      custom_version: ${{ steps.config.outputs.custom_version }}
       compression_level: ${{ steps.config.outputs.compression_level }}
     steps:
       - uses: actions/checkout@v6
@@ -308,6 +309,7 @@ jobs:
           ANDROID_ABI: ${{ needs.validate-config.outputs.android_abi }}
           CHANNELS_JSON: >-
             ${{ needs.validate-config.outputs.matrix }}
+          CUSTOM_VERSION: ${{ needs.validate-config.outputs.custom_version }}
           XZ_COMPRESSION_LEVEL: >-
             ${{ needs.validate-config.outputs.compression_level }}
         run: |
@@ -317,6 +319,7 @@ jobs:
             --release-repository "$GITHUB_REPOSITORY" \
             --release-mode "${{ needs.validate-config.outputs.release_mode }}" \
             --channels-json "$CHANNELS_JSON" \
+            --version-override "$CUSTOM_VERSION" \
             --builder-repository "$GITHUB_REPOSITORY" \
             --builder-workflow ".github/workflows/build-kernels.yml" \
             --builder-run-id "$GITHUB_RUN_ID" --builder-sha "$GITHUB_SHA" \
