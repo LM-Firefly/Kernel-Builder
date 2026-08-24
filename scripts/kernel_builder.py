@@ -220,37 +220,30 @@ def validate_config(args: argparse.Namespace) -> None:
         error("Custom kernel ref cannot contain whitespace")
 
     if mode == "custom":
+        if not repository and not custom_repository:
+            error("Custom mode requires the kernel_repository input")
         item = dict(channels[0])
-        item["id"] = os.environ.get("INPUT_CUSTOM_CHANNEL_ID", "") or item["id"]
-        item["name"] = os.environ.get("INPUT_CUSTOM_CHANNEL_NAME", "") or item["name"]
-        item["repository"] = custom_repository or repository or item["repository"]
+        item["id"] = os.environ.get("INPUT_CUSTOM_CHANNEL_ID", "") or "custom"
+        item["name"] = (
+            os.environ.get("INPUT_CUSTOM_CHANNEL_NAME", "") or "Custom Kernel"
+        )
+        item["repository"] = custom_repository or repository
         item["ref"] = custom_ref or ref or item["ref"]
         if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", item["id"]):
             error(f"Invalid custom channel id: {item['id']}")
-        if not item["name"]:
-            error("Custom channel name must be non-empty")
         custom_version = os.environ.get("INPUT_CUSTOM_VERSION", "")
-        if not custom_version or re.search(r"\s", custom_version):
-            error("Custom releases require custom_version without whitespace")
+        if custom_version and re.search(r"\s", custom_version):
+            error("Custom version cannot contain whitespace")
         channels = [item]
     else:
         channels = [dict(channel) for channel in channels]
-        for item in channels:
-            if repository:
-                item["repository"] = repository
-            if ref:
-                item["ref"] = ref
         custom_version = ""
 
     tag = values["RELEASE_TAG"]
-    if (
-        mode == "official"
-        and not os.environ.get("INPUT_RELEASE_TAG")
-        and os.environ.get("GITHUB_RUN_ID")
-    ):
+    if not os.environ.get("INPUT_RELEASE_TAG") and os.environ.get("GITHUB_RUN_ID"):
         tag = f"{tag}-{os.environ['GITHUB_RUN_ID']}"
     if mode == "custom" and not tag:
-        error("Custom releases require release_tag in .env or workflow input")
+        error("Custom releases require a release tag")
     if mode == "custom" and not os.environ.get("INPUT_RELEASE_MAKE_LATEST"):
         values["RELEASE_MAKE_LATEST"] = "false"
     if not re.fullmatch(r"[A-Za-z0-9._-]+", tag):
@@ -336,10 +329,11 @@ def configure_template(args: argparse.Namespace) -> None:
 
 def fetch_source(args: argparse.Namespace) -> None:
     target = Path(args.root, "lib/mihomo/mihomo")
-    try:
-        shutil.rmtree(target)
-    except OSError as exc:
-        error(f"Unable to remove existing source tree {target}: {exc}")
+    if target.exists():
+        try:
+            shutil.rmtree(target)
+        except OSError as exc:
+            error(f"Unable to remove existing source tree {target}: {exc}")
     target.mkdir(parents=True)
     command(["git", "-C", str(target), "init", "--quiet"])
     command(
@@ -703,6 +697,20 @@ def package_release(args: argparse.Namespace) -> None:
         "kernels": entries,
     }
     write_json(output / "kernel-index.json", manifest)
+    release_record = {
+        "schemaVersion": 1,
+        "kind": kind,
+        "tag": args.release_tag,
+        "generatedAt": args.generated_at,
+        "kernelCount": len(entries),
+        "assets": [entry["asset"] for entry in entries],
+        "manifest": "kernel-index.json",
+    }
+    write_json(output / "kernel-release.json", release_record)
+    (output / "RELEASE_NOTES.md").write_text(
+        f"Kernel release {args.release_tag} generated at {args.generated_at}.\n",
+        encoding="utf-8",
+    )
     if kind == "custom":
         with zipfile.ZipFile(
             output / "kernel-plugin.zip", "w", compression=zipfile.ZIP_STORED

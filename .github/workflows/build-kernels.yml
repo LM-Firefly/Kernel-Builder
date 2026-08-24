@@ -13,104 +13,15 @@ on:
     - cron: "0 */4 * * *"
   workflow_dispatch:
     inputs:
-      template_repository:
-        description: >-
-          Template repository containing the native build adapter (blank: .env)
-        required: false
-        type: string
-        default: ""
-      template_ref:
-        description: "Template branch, tag, or commit (blank: .env)"
-        required: false
-        type: string
-        default: ""
-      kernel_repository:
-        description: >-
-          Override the kernel Git URL for every channel
-          (blank: kernel-builder.json)
-        required: false
-        type: string
-        default: ""
-      kernel_ref:
-        description: >-
-          Override the kernel branch, tag, or commit for every channel
-          (blank: kernel-builder.json)
-        required: false
-        type: string
-        default: ""
-      go_version:
-        description: "Go version (blank: .env)"
-        required: false
-        type: string
-        default: ""
-      go_download_base_url:
-        description: "Go distribution base URL (blank: .env)"
-        required: false
-        type: string
-        default: ""
-      android_ndk_version:
-        description: "Android NDK version (blank: .env)"
-        required: false
-        type: string
-        default: ""
-      android_min_sdk:
-        description: "Android minimum SDK (blank: .env)"
-        required: false
-        type: string
-        default: ""
-      java_version:
-        description: "Java version (blank: .env)"
-        required: false
-        type: string
-        default: ""
       release_mode:
-        description: >-
-          Release mode: official builds alpha/mate/smart;
-          custom builds one kernel
+        description: "Choose the official kernels or one custom kernel"
         required: false
         type: choice
         options: [official, custom]
         default: official
-      release_tag:
+      kernel_repository:
         description: >-
-          Release tag. Custom mode requires it; official mode generates
-          a unique tag when blank.
-        required: false
-        type: string
-        default: ""
-      custom_kernel_repository:
-        description: >-
-          Custom kernel Git URL (custom mode only; blank: kernel-builder.json)
-        required: false
-        type: string
-        default: ""
-      custom_kernel_ref:
-        description: "Custom kernel branch, tag, or commit (custom mode only)"
-        required: false
-        type: string
-        default: ""
-      custom_channel_id:
-        description: "Custom kernel id, for example partner"
-        required: false
-        type: string
-        default: ""
-      custom_channel_name:
-        description: "Custom kernel display name"
-        required: false
-        type: string
-        default: ""
-      release_name:
-        description: "Release display name (blank: .env)"
-        required: false
-        type: string
-        default: ""
-      release_prerelease:
-        description: "Mark the Release as a prerelease (blank: .env)"
-        required: false
-        type: string
-        default: ""
-      release_make_latest:
-        description: "Mark this Release as latest (blank: .env)"
+          Custom kernel repository URL (required only for custom mode)
         required: false
         type: string
         default: ""
@@ -129,25 +40,8 @@ jobs:
     name: Validate configuration
     runs-on: ubuntu-latest
     env:
-      INPUT_TEMPLATE_REPOSITORY: ${{ inputs.template_repository }}
-      INPUT_TEMPLATE_REF: ${{ inputs.template_ref }}
       INPUT_KERNEL_REPOSITORY: ${{ inputs.kernel_repository }}
-      INPUT_KERNEL_REF: ${{ inputs.kernel_ref }}
-      INPUT_GO_VERSION: ${{ inputs.go_version }}
-      INPUT_GO_DOWNLOAD_BASE_URL: ${{ inputs.go_download_base_url }}
-      INPUT_ANDROID_NDK_VERSION: ${{ inputs.android_ndk_version }}
-      INPUT_ANDROID_MIN_SDK: ${{ inputs.android_min_sdk }}
-      INPUT_JAVA_VERSION: ${{ inputs.java_version }}
       INPUT_RELEASE_MODE: ${{ inputs.release_mode }}
-      INPUT_RELEASE_TAG: ${{ inputs.release_tag }}
-      INPUT_RELEASE_NAME: ${{ inputs.release_name }}
-      INPUT_RELEASE_PRERELEASE: ${{ inputs.release_prerelease }}
-      INPUT_RELEASE_MAKE_LATEST: ${{ inputs.release_make_latest }}
-      INPUT_CUSTOM_KERNEL_REPOSITORY: ${{ inputs.custom_kernel_repository }}
-      INPUT_CUSTOM_KERNEL_REF: ${{ inputs.custom_kernel_ref }}
-      INPUT_CUSTOM_CHANNEL_ID: ${{ inputs.custom_channel_id }}
-      INPUT_CUSTOM_CHANNEL_NAME: ${{ inputs.custom_channel_name }}
-      INPUT_CUSTOM_VERSION: ${{ inputs.custom_version }}
     outputs:
       matrix: ${{ steps.config.outputs.matrix }}
       template_repository: ${{ steps.config.outputs.template_repository }}
@@ -442,6 +336,8 @@ jobs:
             cp release-assets/kernel-plugin.zip release-assets/publish-assets/
           else
             cp release-assets/kernel-index.json release-assets/publish-assets/
+            cp release-assets/kernel-release.json release-assets/publish-assets/
+            cp release-assets/RELEASE_NOTES.md release-assets/publish-assets/
             cp release-assets/*.so.xz release-assets/publish-assets/
           fi
 
