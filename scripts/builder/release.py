@@ -10,12 +10,12 @@ import re
 import zipfile
 from pathlib import Path
 
-from .common import ABI, OFFICIAL_CHANNELS, ROOT, error, read_json, read_properties, release_version, streams_equal, write_json, write_outputs
+from .common import ALL_ABIS, DEFAULT_ABI, OFFICIAL_CHANNELS, ROOT, error, read_json, read_properties, release_version, streams_equal, write_json, write_outputs
 
 def index_cores(root: Path, abi: str) -> dict[str, Path]:
     """Index verified cores once instead of recursively scanning per channel."""
     indexed: dict[str, Path] = {}
-    for path in root.rglob("libmihomocore.so"):
+    for path in root.rglob("libmihomo.so"):
         parts = path.parts
         for index in range(len(parts) - 1):
             if parts[index + 1] != abi:
@@ -39,12 +39,22 @@ def compress_core(source: Path, target: Path, preset: int) -> tuple[str, int]:
     return digest, target.stat().st_size
 
 def verify_release_directory(directory: Path) -> None:
-    manifest = read_json(directory / "kernel-index.json")
+    manifests = sorted(directory.glob("kernel-index*.json"))
+    if not manifests:
+        error(f"No kernel-index*.json found in {directory}")
+    for manifest_path in manifests:
+        verify_single_manifest(manifest_path)
+    print(f"Verified release assets in {directory}")
+
+def verify_single_manifest(manifest_path: Path) -> None:
+    manifest = read_json(manifest_path)
+    directory = manifest_path.parent
+    manifest_abi = manifest.get("abi", DEFAULT_ABI)
     release = manifest.get("release", {})
     kind = release.get("kind", "official")
     if (
         manifest.get("schemaVersion") != 3
-        or manifest.get("abi") != ABI
+        or manifest_abi not in {DEFAULT_ABI, *ALL_ABIS}
         or kind not in {"official", "custom"}
     ):
         error("Unsupported kernel index schema, ABI, or release kind")
@@ -52,13 +62,14 @@ def verify_release_directory(directory: Path) -> None:
     ids = [kernel.get("id") for kernel in kernels]
     if not ids or len(ids) != len(set(ids)):
         error("Release kernel ids must be unique and non-empty")
-    if kind == "official" and set(ids) != OFFICIAL_CHANNELS:
-        error("Official releases must contain exactly alpha, meta, smart, and ebpf kernels")
+    if kind == "official" and not set(ids).issubset(OFFICIAL_CHANNELS):
+        error("Official releases must contain only alpha, meta, smart, and ebpf kernels")
     if kind == "custom" and len(ids) != 1:
         error("Custom releases must contain exactly one kernel")
     if manifest.get("defaultKernel") not in ids:
         error("Invalid default kernel")
-    expected_assets = {f"kernel-{channel}.so.xz" for channel in ids}
+    # Read expected asset names from manifest entries (supports ABI-suffixed names).
+    expected_assets = {kernel.get("asset", "") for kernel in kernels}
     for kernel in kernels:
         commit = kernel.get("commit", "")
         if not re.fullmatch(r"[0-9a-f]{40}", commit):
@@ -70,7 +81,7 @@ def verify_release_directory(directory: Path) -> None:
             error(f"Invalid version for {kernel.get('id')}: {kernel.get('version')}")
         if (
             not kernel.get("name")
-            or kernel.get("abi") != ABI
+            or kernel.get("abi") != manifest_abi
             or kernel.get("asset") not in expected_assets
             or kernel.get("compression") != "xz"
             or not str(kernel.get("downloadUrl", "")).startswith("https://")
@@ -119,7 +130,7 @@ def verify_release_directory(directory: Path) -> None:
                             error(f"Custom plugin asset mismatch: {asset_name}")
         except (OSError, zipfile.BadZipFile, KeyError, json.JSONDecodeError) as exc:
             error(f"Invalid custom plugin: {exc}")
-    print(f"Verified release assets in {directory}")
+    print(f"Verified {manifest_path.name} ({manifest_abi}, {len(kernels)} kernels)")
 
 def package_release(args: argparse.Namespace) -> None:
     root = Path(args.root)
@@ -157,8 +168,8 @@ def package_release(args: argparse.Namespace) -> None:
     if len(channel_ids) != len(set(channel_ids)):
         error("Release channel ids must be unique")
     plugin_url = f"https://github.com/{args.release_repository}/releases/download/{args.release_tag}/kernel-plugin.zip"
-    if kind == "official" and set(channel_ids) != OFFICIAL_CHANNELS:
-        error("Official releases must contain exactly alpha, meta, smart, and ebpf channels")
+    if kind == "official" and not set(channel_ids).issubset(OFFICIAL_CHANNELS):
+        error("Official releases must contain only alpha, meta, smart, and ebpf channels")
     if kind == "custom" and len(channels) != 1:
         error("Custom releases must contain exactly one kernel channel")
     core_index = index_cores(root, args.abi)
@@ -189,7 +200,11 @@ def package_release(args: argparse.Namespace) -> None:
             error(f"Invalid source commit: {source_dir}")
         if not re.fullmatch(r"[0-9a-f]{40}", template_commit):
             error(f"Invalid template commit: {source_dir}")
-        asset_name = f"kernel-{channel_id}.so.xz"
+        # Non-default ABI assets get an ABI suffix to prevent name collisions when multiple ABIs are published to the same release.
+        asset_name = (
+            f"kernel-{channel_id}.so.xz" if args.abi == DEFAULT_ABI
+            else f"kernel-{channel_id}-{args.abi}.so.xz"
+        )
         asset = output / asset_name
         sha256, size_bytes = compress_core(core, asset, preset)
         entries.append(
@@ -214,6 +229,14 @@ def package_release(args: argparse.Namespace) -> None:
                 "templateCommit": template_commit,
             }
         )
+    manifest_filename = (
+        "kernel-index.json" if args.abi == DEFAULT_ABI
+        else f"kernel-index-{args.abi}.json"
+    )
+    manifest_url = (
+        plugin_url if kind == "custom"
+        else f"https://github.com/{args.release_repository}/releases/download/{args.release_tag}/{manifest_filename}"
+    )
     manifest = {
         "schemaVersion": 3,
         "generatedAt": args.generated_at,
@@ -221,9 +244,7 @@ def package_release(args: argparse.Namespace) -> None:
             "kind": kind,
             "tag": args.release_tag,
             "url": f"https://github.com/{args.release_repository}/releases/tag/{args.release_tag}",
-            "manifestUrl": plugin_url
-            if kind == "custom"
-            else f"https://github.com/{args.release_repository}/releases/download/{args.release_tag}/kernel-index.json",
+            "manifestUrl": manifest_url,
             **(
                 {"plugin": {"asset": "kernel-plugin.zip", "downloadUrl": plugin_url}}
                 if kind == "custom"
@@ -239,7 +260,10 @@ def package_release(args: argparse.Namespace) -> None:
         },
         "defaultKernel": channels[0]["id"]
         if kind == "custom"
-        else config.get("defaultKernel", "alpha"),
+        else next(
+            (cid for cid in [config.get("defaultKernel", "alpha")] + channel_ids if cid in set(channel_ids)),
+            channel_ids[0],
+        ),
         "abi": args.abi,
         "shellAbi": config["shellAbi"],
         "template": {"repository": args.template_repository, "ref": args.template_ref},
@@ -251,15 +275,16 @@ def package_release(args: argparse.Namespace) -> None:
         },
         "kernels": entries,
     }
-    write_json(output / "kernel-index.json", manifest)
+    write_json(output / manifest_filename, manifest)
     release_record = {
         "schemaVersion": 1,
         "kind": kind,
         "tag": args.release_tag,
         "generatedAt": args.generated_at,
+        "abi": args.abi,
         "kernelCount": len(entries),
         "assets": [entry["asset"] for entry in entries],
-        "manifest": "kernel-index.json",
+        "manifest": manifest_filename,
     }
     write_json(output / "kernel-release.json", release_record)
     (output / "RELEASE_NOTES.md").write_text(
@@ -270,11 +295,10 @@ def package_release(args: argparse.Namespace) -> None:
         with zipfile.ZipFile(
             output / "kernel-plugin.zip", "w", compression=zipfile.ZIP_STORED
         ) as archive:
-            archive.write(output / "kernel-index.json", "kernel-index.json")
+            archive.write(output / manifest_filename, "kernel-index.json")
             for entry in entries:
                 archive.write(output / entry["asset"], entry["asset"])
     verify_release_directory(output)
     if args.github_output:
         write_outputs(Path(args.github_output), {"release_tag": args.release_tag})
     print(f"Packaged {len(entries)} kernel assets in {output}")
-
