@@ -9,7 +9,7 @@ import shutil
 import struct
 from pathlib import Path
 
-from .common import ABI, HEX_COMMIT, authenticated_url, command, error, read_json, write_json
+from .common import ALL_ABIS, HEX_COMMIT, authenticated_url, command, error, read_json, write_json
 
 def detect_upstream(args: argparse.Namespace) -> None:
     rows = command(
@@ -36,12 +36,14 @@ def verify_native_source(args: argparse.Namespace) -> None:
     required = (
         "scripts/native-build.py",
         "scripts/native/cli.py",
-        "lib/native/go/native/entry.go",
         "lib/native/go/go.mod",
-        "lib/native/shell/CMakeLists.txt",
-        "lib/native/shell/shell.c",
         "kernel.properties",
     )
+    # FlyCat uses main.go (c-shared); YumeBox uses entry.go (PIE shell).
+    # Accept either layout.
+    go_entry = root / "lib/native/go/native"
+    if not ((go_entry / "main.go").is_file() or (go_entry / "entry.go").is_file()):
+        error(f"Missing Go native entry: expected {go_entry}/main.go or entry.go")
     for relative in required:
         if not (root / relative).is_file():
             error(f"Missing native source contract file: {root / relative}")
@@ -134,7 +136,7 @@ def copy_artifact(args: argparse.Namespace) -> None:
     source = Path(args.source)
     target = Path(args.target)
     target.mkdir(parents=True, exist_ok=True)
-    for name in ("libmihomocore.so", "core-version.properties", "source.json"):
+    for name in ("libmihomo.so", "core-version.properties", "source.json"):
         path = source / name
         if not path.is_file():
             error(f"Missing artifact file: {path}")
@@ -143,7 +145,7 @@ def copy_artifact(args: argparse.Namespace) -> None:
 def stage_verified_artifact(args: argparse.Namespace) -> None:
     root = Path(args.root)
     candidates = []
-    for core in root.rglob("libmihomocore.so"):
+    for core in root.rglob("libmihomo.so"):
         parts = core.parts
         if any(
             parts[index : index + 2] == (args.channel, args.abi)
@@ -154,26 +156,45 @@ def stage_verified_artifact(args: argparse.Namespace) -> None:
         error(f"Expected one core for {args.channel}, found {len(candidates)}")
     copy_artifact(argparse.Namespace(source=str(candidates[0]), target=args.target))
 
-def valid_arm64_core(path: Path) -> bool:
+ABI_ELF_MACHINE = {
+    "armeabi-v7a": (1, 40),   # ELFCLASS32, EM_ARM
+    "arm64-v8a": (2, 183),    # ELFCLASS64, EM_AARCH64
+    "x86": (1, 3),            # ELFCLASS32, EM_386
+    "x86_64": (2, 62),        # ELFCLASS64, EM_X86_64
+}
+
+def valid_core(path: Path, abi: str) -> bool:
+    expected_class, expected_machine = ABI_ELF_MACHINE.get(abi, (0, 0))
+    if not expected_class:
+        return False
     data = path.read_bytes()
-    if len(data) < 64 or data[:6] != b"\x7fELF\x02\x01":
+    if len(data) < 64 or data[:4] != b"\x7fELF":
+        return False
+    elf_class = data[4]
+    if elf_class != expected_class:
         return False
     file_type, machine = struct.unpack_from("<HH", data, 16)
-    if file_type != 3 or machine != 183:
+    if file_type != 3 or machine != expected_machine:
         return False
-    section_offset = struct.unpack_from("<Q", data, 40)[0]
-    section_size, section_count = struct.unpack_from("<HH", data, 58)
+    section_offset = struct.unpack_from("<I" if expected_class == 1 else "<Q", data, 32 if expected_class == 1 else 40)[0]
+    section_size, section_count = struct.unpack_from("<HH", data, 46 if expected_class == 1 else 58)
     if not section_offset or not section_size or not section_count:
         return False
     sections: list[tuple[int, int, int, int, int]] = []
     for index in range(section_count):
         offset = section_offset + index * section_size
-        if offset + 64 > len(data):
+        if offset + (28 if expected_class == 1 else 64) > len(data):
             return False
-        section_type = struct.unpack_from("<I", data, offset + 4)[0]
-        data_offset, data_size = struct.unpack_from("<QQ", data, offset + 24)
-        link = struct.unpack_from("<I", data, offset + 40)[0]
-        entry_size = struct.unpack_from("<Q", data, offset + 56)[0]
+        if expected_class == 1:  # ELF32
+            section_type = struct.unpack_from("<I", data, offset + 4)[0]
+            data_offset, data_size = struct.unpack_from("<II", data, offset + 16)
+            link = struct.unpack_from("<I", data, offset + 24)[0]
+            entry_size = struct.unpack_from("<I", data, offset + 36)[0]
+        else:  # ELF64
+            section_type = struct.unpack_from("<I", data, offset + 4)[0]
+            data_offset, data_size = struct.unpack_from("<QQ", data, offset + 24)
+            link = struct.unpack_from("<I", data, offset + 40)[0]
+            entry_size = struct.unpack_from("<Q", data, offset + 56)[0]
         sections.append((section_type, data_offset, data_size, link, entry_size))
     for section_type, data_offset, data_size, link, entry_size in sections:
         if section_type not in (2, 11) or not entry_size or link >= len(sections):
@@ -186,18 +207,20 @@ def valid_arm64_core(path: Path) -> bool:
                 continue
             name_offset = struct.unpack_from("<I", data, symbol_offset)[0]
             name_end = strings.find(b"\0", name_offset)
-            if name_end >= 0 and strings[name_offset:name_end] == b"MihomoMain":
-                return True
+            if name_end >= 0:
+                sym = strings[name_offset:name_end]
+                if sym in (b"MihomoMain", b"coreInit"):
+                    return True
     return False
 
 def verify_core(args: argparse.Namespace) -> None:
     root = Path(args.root)
-    cores = list(root.rglob("libmihomocore.so"))
+    cores = list(root.rglob("libmihomo.so"))
     if len(cores) != 1:
         error(f"Expected one core under {root}, found {len(cores)}")
     core = cores[0]
-    if args.abi != ABI or not valid_arm64_core(core):
-        error(f"Invalid Android ARM64 core: {core}")
+    if args.abi not in ALL_ABIS or not valid_core(core, args.abi):
+        error(f"Invalid Android core for {args.abi}: {core}")
     source_files = list(root.rglob("source.json"))
     if len(source_files) != 1:
         error(f"Expected one source.json under {root}, found {len(source_files)}")
@@ -206,5 +229,3 @@ def verify_core(args: argparse.Namespace) -> None:
         if not re.fullmatch(r"[0-9a-f]{40}", source.get(key, "")):
             error(f"Invalid {key} in {source_files[0]}")
     print(f"Verified {core} ({args.abi})")
-
-
