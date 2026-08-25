@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 
 try:
-    from builder.common import ABI, release_version
+    from builder.common import DEFAULT_ABI, release_version
     from builder.config import validate_config
     from builder.notify import notify_telegram
     from builder.release import compress_core, package_release, verify_release_directory
@@ -21,7 +21,7 @@ try:
         stage_verified_artifact, verify_core, verify_native_source,
     )
 except ModuleNotFoundError:
-    from scripts.builder.common import ABI, release_version
+    from scripts.builder.common import DEFAULT_ABI, release_version
     from scripts.builder.config import validate_config
     from scripts.builder.notify import notify_telegram
     from scripts.builder.release import compress_core, package_release, verify_release_directory
@@ -119,7 +119,7 @@ def parser() -> argparse.ArgumentParser:
     item.add_argument("--template-ref", required=True)
     item.add_argument("--go-version", required=True)
     item.add_argument("--ndk-version", required=True)
-    item.add_argument("--abi", default=ABI)
+    item.add_argument("--abi", default=DEFAULT_ABI)
     item.add_argument("--compression-level", default="9")
     item.add_argument("--github-output")
     item.set_defaults(handler=package_release)
