@@ -206,10 +206,13 @@ def validate_config(args: argparse.Namespace) -> None:
     if not matrix:
         error("Matrix expansion produced zero entries")
 
+    distinct_abis = sorted({entry["abi"] for entry in matrix})
+
     write_outputs(
         Path(args.github_output),
         {
             "matrix": matrix,
+            "distinct_abis": distinct_abis,
             "template_repository": values["TEMPLATE_REPOSITORY"],
             "template_ref": values["TEMPLATE_REF"],
             "android_ndk_version": values["ANDROID_NDK_VERSION"],

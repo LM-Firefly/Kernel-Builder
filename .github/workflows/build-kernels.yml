@@ -58,6 +58,7 @@ jobs:
       release_name: ${{ steps.config.outputs.release_name }}
       custom_version: ${{ steps.config.outputs.custom_version }}
       compression_level: ${{ steps.config.outputs.compression_level }}
+      distinct_abis: ${{ steps.config.outputs.distinct_abis }}
     steps:
       - uses: actions/checkout@v6
 
@@ -283,19 +284,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        abi: >-
-          ${{
-            fromJSON(
-              format('["{0}"]',
-                join(
-                  unique(
-                    fromJSON(needs.validate-config.outputs.matrix)[*].abi
-                  ),
-                  '","'
-                )
-              )
-            )
-          }}
+        abi: ${{ fromJSON(needs.validate-config.outputs.distinct_abis) }}
     outputs:
       release_tag: ${{ steps.release.outputs.release_tag }}
     steps:

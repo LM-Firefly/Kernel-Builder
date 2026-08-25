@@ -15,7 +15,7 @@ from .common import ALL_ABIS, DEFAULT_ABI, OFFICIAL_CHANNELS, ROOT, error, read_
 def index_cores(root: Path, abi: str) -> dict[str, Path]:
     """Index verified cores once instead of recursively scanning per channel."""
     indexed: dict[str, Path] = {}
-    for path in root.rglob("libmihomocore.so"):
+    for path in root.rglob("libmihomo.so"):
         parts = path.parts
         for index in range(len(parts) - 1):
             if parts[index + 1] != abi:

@@ -48,7 +48,8 @@
       "suffix": "",
       "buildTags": "foss,with_gvisor,cmfa,with_ebpf",
       "capabilities": ["ebpf"],
-      "abis": ["arm64-v8a", "x86_64"]
+      "abis": ["arm64-v8a", "x86_64"],
+      "patches": "patches/ebpf"
     }
   ]
 }
