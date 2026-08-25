@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "YumeBox Kernel Index",
+  "title": "FlyCat Kernel Index",
   "type": "object",
   "additionalProperties": false,
   "required": ["schemaVersion", "generatedAt", "release", "builder", "defaultKernel", "abi", "shellAbi", "template", "toolchain", "kernels"],
