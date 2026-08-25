@@ -52,8 +52,8 @@ def verify_release_directory(directory: Path) -> None:
     ids = [kernel.get("id") for kernel in kernels]
     if not ids or len(ids) != len(set(ids)):
         error("Release kernel ids must be unique and non-empty")
-    if kind == "official" and set(ids) != OFFICIAL_CHANNELS:
-        error("Official releases must contain exactly alpha, meta, smart, and ebpf kernels")
+    if kind == "official" and not set(ids).issubset(OFFICIAL_CHANNELS):
+        error("Official releases must contain only alpha, meta, smart, and ebpf kernels")
     if kind == "custom" and len(ids) != 1:
         error("Custom releases must contain exactly one kernel")
     if manifest.get("defaultKernel") not in ids:
@@ -157,8 +157,8 @@ def package_release(args: argparse.Namespace) -> None:
     if len(channel_ids) != len(set(channel_ids)):
         error("Release channel ids must be unique")
     plugin_url = f"https://github.com/{args.release_repository}/releases/download/{args.release_tag}/kernel-plugin.zip"
-    if kind == "official" and set(channel_ids) != OFFICIAL_CHANNELS:
-        error("Official releases must contain exactly alpha, meta, smart, and ebpf channels")
+    if kind == "official" and not set(channel_ids).issubset(OFFICIAL_CHANNELS):
+        error("Official releases must contain only alpha, meta, smart, and ebpf channels")
     if kind == "custom" and len(channels) != 1:
         error("Custom releases must contain exactly one kernel channel")
     core_index = index_cores(root, args.abi)
@@ -245,7 +245,10 @@ def package_release(args: argparse.Namespace) -> None:
         },
         "defaultKernel": channels[0]["id"]
         if kind == "custom"
-        else config.get("defaultKernel", "alpha"),
+        else next(
+            (cid for cid in [config.get("defaultKernel", "alpha")] + channel_ids if cid in set(channel_ids)),
+            channel_ids[0],
+        ),
         "abi": args.abi,
         "shellAbi": config["shellAbi"],
         "template": {"repository": args.template_repository, "ref": args.template_ref},
