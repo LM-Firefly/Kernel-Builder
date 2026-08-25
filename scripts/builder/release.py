@@ -39,12 +39,22 @@ def compress_core(source: Path, target: Path, preset: int) -> tuple[str, int]:
     return digest, target.stat().st_size
 
 def verify_release_directory(directory: Path) -> None:
-    manifest = read_json(directory / "kernel-index.json")
+    manifests = sorted(directory.glob("kernel-index*.json"))
+    if not manifests:
+        error(f"No kernel-index*.json found in {directory}")
+    for manifest_path in manifests:
+        verify_single_manifest(manifest_path)
+    print(f"Verified release assets in {directory}")
+
+def verify_single_manifest(manifest_path: Path) -> None:
+    manifest = read_json(manifest_path)
+    directory = manifest_path.parent
+    manifest_abi = manifest.get("abi", DEFAULT_ABI)
     release = manifest.get("release", {})
     kind = release.get("kind", "official")
     if (
         manifest.get("schemaVersion") != 3
-        or manifest.get("abi") not in {DEFAULT_ABI, *ALL_ABIS}
+        or manifest_abi not in {DEFAULT_ABI, *ALL_ABIS}
         or kind not in {"official", "custom"}
     ):
         error("Unsupported kernel index schema, ABI, or release kind")
@@ -70,7 +80,7 @@ def verify_release_directory(directory: Path) -> None:
             error(f"Invalid version for {kernel.get('id')}: {kernel.get('version')}")
         if (
             not kernel.get("name")
-            or kernel.get("abi") != ABI
+            or kernel.get("abi") != manifest_abi
             or kernel.get("asset") not in expected_assets
             or kernel.get("compression") != "xz"
             or not str(kernel.get("downloadUrl", "")).startswith("https://")
@@ -119,7 +129,7 @@ def verify_release_directory(directory: Path) -> None:
                             error(f"Custom plugin asset mismatch: {asset_name}")
         except (OSError, zipfile.BadZipFile, KeyError, json.JSONDecodeError) as exc:
             error(f"Invalid custom plugin: {exc}")
-    print(f"Verified release assets in {directory}")
+    print(f"Verified {manifest_path.name} ({manifest_abi}, {len(kernels)} kernels)")
 
 def package_release(args: argparse.Namespace) -> None:
     root = Path(args.root)
