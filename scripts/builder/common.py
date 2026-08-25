@@ -9,12 +9,13 @@ from pathlib import Path
 from typing import Any, NoReturn
 
 ROOT = Path(__file__).resolve().parents[2]
-ABI = "arm64-v8a"
+DEFAULT_ABI = "arm64-v8a"
+ALL_ABIS = ("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
 OFFICIAL_CHANNELS = {"alpha", "meta", "smart", "ebpf"}
 HEX_COMMIT = re.compile(r"[0-9a-f]{40}")
 REQUIRED_ENV = (
     "TEMPLATE_REPOSITORY", "TEMPLATE_REF", "ANDROID_NDK_VERSION",
-    "ANDROID_MIN_SDK", "ANDROID_ABI", "JAVA_VERSION", "GO_VERSION",
+    "ANDROID_MIN_SDK", "JAVA_VERSION", "GO_VERSION",
     "GO_DOWNLOAD_BASE_URL", "RELEASE_TAG", "RELEASE_NAME",
     "RELEASE_PRERELEASE", "RELEASE_MAKE_LATEST", "COMPRESSION",
     "COMPRESSION_LEVEL",
@@ -128,5 +129,3 @@ def streams_equal(left: Any, right: Any) -> bool:
             return False
         if not left_chunk:
             return True
-
-
