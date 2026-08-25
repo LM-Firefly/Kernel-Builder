@@ -1,0 +1,8 @@
+# Normalize text files to LF in both the repository and the working tree.
+# Without this, Windows checkouts become CRLF (core.autocrlf) and local
+# `git apply` on kernel patches fails with "corrupt patch" while Linux CI
+# applies the very same patches fine.
+* text=auto eol=lf
+
+# Windows batch files require CRLF
+*.bat text eol=crlf

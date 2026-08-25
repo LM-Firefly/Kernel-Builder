@@ -7,7 +7,7 @@ import os
 import re
 from pathlib import Path
 
-from .common import ABI, OFFICIAL_CHANNELS, REQUIRED_ENV, error, read_dotenv, read_json, repository_identity, write_outputs
+from .common import ALL_ABIS, DEFAULT_ABI, OFFICIAL_CHANNELS, REQUIRED_ENV, error, read_dotenv, read_json, repository_identity, write_outputs
 
 def validate_config(args: argparse.Namespace) -> None:
     values = read_dotenv(Path(args.env))
@@ -32,8 +32,6 @@ def validate_config(args: argparse.Namespace) -> None:
     missing = [key for key in REQUIRED_ENV if not values.get(key)]
     if missing:
         error(f"Missing required .env key(s): {', '.join(missing)}")
-    if values["ANDROID_ABI"] != ABI:
-        error(f"Only ANDROID_ABI={ABI} is supported")
     if values["COMPRESSION"] != "xz":
         error("Only COMPRESSION=xz is supported")
     if values["RELEASE_PRERELEASE"] not in {"true", "false"}:
@@ -64,13 +62,19 @@ def validate_config(args: argparse.Namespace) -> None:
         error("RELEASE_MODE must be official or custom")
 
     config = read_json(Path(args.config))
+    schema_version = config.get("schemaVersion")
     if (
-        config.get("schemaVersion") != 1
+        schema_version not in {1, 2}
         or not isinstance(config.get("shellAbi"), int)
         or config["shellAbi"] < 1
-        or config.get("abis") != [ABI]
     ):
-        error("Invalid kernel-builder.json schema, shell ABI, or target ABI")
+        error("Invalid kernel-builder.json schema or shell ABI")
+    config_abis = config.get("abis", [])
+    if not isinstance(config_abis, list) or not config_abis:
+        error("kernel-builder.json must list at least one ABI")
+    for abi in config_abis:
+        if abi not in ALL_ABIS:
+            error(f"Unsupported ABI in config: {abi}")
     channels = config.get("channels", [])
     if not isinstance(channels, list) or not channels:
         error("kernel-builder.json must contain at least one channel")
@@ -88,6 +92,7 @@ def validate_config(args: argparse.Namespace) -> None:
     if not patch_dir.is_dir():
         error(f"Missing patch directory: {patch_dir}")
     for channel in channels:
+        channel_abis = channel.get("abis")
         if (
             not re.fullmatch(r"[a-z0-9][a-z0-9-]*", channel.get("id", ""))
             or not channel.get("name")
@@ -105,6 +110,9 @@ def validate_config(args: argparse.Namespace) -> None:
             )
             or len(channel.get("capabilities", []))
             != len(set(channel.get("capabilities", [])))
+            or not isinstance(channel_abis, list)
+            or not channel_abis
+            or any(abi not in ALL_ABIS for abi in channel_abis)
         ):
             error(f"Invalid channel: {channel.get('id')}")
 
@@ -157,7 +165,14 @@ def validate_config(args: argparse.Namespace) -> None:
             if channel["suffix"] == f"-{channel['id']}":
                 channel["suffix"] = ""
     for channel in channels:
-        channel["patches"] = patches
+        channel_patches = channel.get("patches", "")
+        if channel_patches and not channel_patches.startswith("patches/"):
+            error(f"Invalid patches directory for channel {channel.get('id')}: {channel_patches}")
+        if channel_patches:
+            ch_patch_dir = Path(args.config).parent / channel_patches
+            if not ch_patch_dir.is_dir():
+                error(f"Missing channel patch directory: {ch_patch_dir}")
+        channel["patches"] = channel_patches if channel_patches else patches
 
     if mode == "official":
         # The official feed is a stable URL. Every run updates the fixed
@@ -181,15 +196,27 @@ def validate_config(args: argparse.Namespace) -> None:
         default_kernel = channels[0]["id"]
     elif default_kernel not in {item["id"] for item in channels}:
         error(f"Configured default kernel is not present: {default_kernel}")
+    # Expand channel × ABI matrix: each channel only builds its declared ABIs.
+    matrix = []
+    for channel in channels:
+        for abi in channel.get("abis", config_abis):
+            entry = dict(channel)
+            entry["abi"] = abi
+            matrix.append(entry)
+    if not matrix:
+        error("Matrix expansion produced zero entries")
+
+    distinct_abis = sorted({entry["abi"] for entry in matrix})
+
     write_outputs(
         Path(args.github_output),
         {
-            "matrix": channels,
+            "matrix": matrix,
+            "distinct_abis": distinct_abis,
             "template_repository": values["TEMPLATE_REPOSITORY"],
             "template_ref": values["TEMPLATE_REF"],
             "android_ndk_version": values["ANDROID_NDK_VERSION"],
             "android_min_sdk": values["ANDROID_MIN_SDK"],
-            "android_abi": values["ANDROID_ABI"],
             "java_version": values["JAVA_VERSION"],
             "go_version": values["GO_VERSION"],
             "go_download_base_url": values["GO_DOWNLOAD_BASE_URL"],
@@ -202,5 +229,4 @@ def validate_config(args: argparse.Namespace) -> None:
             "compression_level": values["COMPRESSION_LEVEL"],
         },
     )
-    print(f"Validated {args.config} for {ABI} ({mode} release)")
-
+    print(f"Validated {args.config} ({mode} release, {len(matrix)} builds)")

@@ -1,0 +1,10 @@
+{
+    "files.eol": "\n",
+    "files.trimTrailingWhitespace": true,
+    "[diff]": {
+        "files.trimTrailingWhitespace": false
+    },
+    "[patch]": {
+        "files.trimTrailingWhitespace": false
+    }
+}
