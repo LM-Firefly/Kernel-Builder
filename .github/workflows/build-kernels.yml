@@ -48,7 +48,6 @@ jobs:
       template_ref: ${{ steps.config.outputs.template_ref }}
       android_ndk_version: ${{ steps.config.outputs.android_ndk_version }}
       android_min_sdk: ${{ steps.config.outputs.android_min_sdk }}
-      android_abi: ${{ steps.config.outputs.android_abi }}
       java_version: ${{ steps.config.outputs.java_version }}
       release_mode: ${{ steps.config.outputs.release_mode }}
       go_version: ${{ steps.config.outputs.go_version }}
@@ -73,7 +72,7 @@ jobs:
           --config kernel-builder.json --github-output "$GITHUB_OUTPUT"
 
   detect-upstream:
-    name: Detect ${{ matrix.channel.id }} upstream
+    name: Detect ${{ matrix.channel.id }} ${{ matrix.channel.abi }}
     needs: validate-config
     runs-on: ubuntu-latest
     strategy:
@@ -101,13 +100,13 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         with:
-          name: upstream-arm64-${{ matrix.channel.id }}
+          name: upstream-${{ matrix.channel.abi }}-${{ matrix.channel.id }}
           path: upstream.json
           if-no-files-found: error
           compression-level: 0
 
   build-core:
-    name: Build ${{ matrix.channel.id }} arm64
+    name: Build ${{ matrix.channel.id }} ${{ matrix.channel.abi }}
     needs: [validate-config, detect-upstream]
     runs-on: ubuntu-latest
     strategy:
@@ -116,17 +115,17 @@ jobs:
         channel: ${{ fromJSON(needs.validate-config.outputs.matrix) }}
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-      ABI_APP_LIST: ${{ needs.validate-config.outputs.android_abi }}
+      ABI_APP_LIST: ${{ matrix.channel.abi }}
     steps:
       - name: Checkout builder configuration
         uses: actions/checkout@v6
 
       - uses: actions/download-artifact@v8
         with:
-          name: upstream-arm64-${{ matrix.channel.id }}
+          name: upstream-${{ matrix.channel.abi }}-${{ matrix.channel.id }}
           path: upstream
 
-      - name: Checkout YumeBox source template
+      - name: Checkout source template
         uses: actions/checkout@v6
         with:
           repository: ${{ needs.validate-config.outputs.template_repository }}
@@ -145,7 +144,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Verify YumeBox native source contract
+      - name: Verify native source contract
         run: >-
           python3 scripts/kernel_builder.py verify-native-source
           --root app-template
@@ -195,7 +194,7 @@ jobs:
           python3 scripts/kernel_builder.py resolve-go-dependencies
           --root app-template
 
-      - name: Build ARM64 core through the native adapter
+      - name: Build core through the native adapter
         working-directory: app-template
         env:
           EXTERNAL_MIHOMO_BRANCH: ${{ matrix.channel.id }}
@@ -213,13 +212,13 @@ jobs:
           EXPECTED_COMMIT_FILE: ${{ github.workspace }}/upstream/upstream.json
         run: >-
           python3 scripts/kernel_builder.py record-metadata --root app-template
-          --abi "${{ needs.validate-config.outputs.android_abi }}"
+          --abi "${{ matrix.channel.abi }}"
           --repository "$KERNEL_REPOSITORY" --ref "$KERNEL_REF"
           --expected "$EXPECTED_COMMIT_FILE"
 
       - name: Stage raw core
         env:
-          ANDROID_ABI: ${{ needs.validate-config.outputs.android_abi }}
+          ANDROID_ABI: ${{ matrix.channel.abi }}
           CHANNEL_ID: ${{ matrix.channel.id }}
         run: >-
           python3 scripts/kernel_builder.py copy-artifact
@@ -228,13 +227,13 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         with:
-          name: raw-arm64-${{ matrix.channel.id }}
+          name: raw-${{ matrix.channel.abi }}-${{ matrix.channel.id }}
           path: kernel-artifact
           if-no-files-found: error
           retention-days: 7
 
   verify-core:
-    name: Verify ${{ matrix.channel.id }} arm64
+    name: Verify ${{ matrix.channel.id }} ${{ matrix.channel.abi }}
     needs: [validate-config, build-core]
     runs-on: ubuntu-latest
     strategy:
@@ -250,19 +249,19 @@ jobs:
 
       - uses: actions/download-artifact@v8
         with:
-          name: raw-arm64-${{ matrix.channel.id }}
+          name: raw-${{ matrix.channel.abi }}-${{ matrix.channel.id }}
           path: raw-artifacts
 
       - name: Verify Android ELF and native entrypoint contract
         env:
-          ANDROID_ABI: ${{ needs.validate-config.outputs.android_abi }}
+          ANDROID_ABI: ${{ matrix.channel.abi }}
         run: >-
           python3 scripts/kernel_builder.py verify-core --root raw-artifacts
           --abi "$ANDROID_ABI"
 
       - name: Stage verified core
         env:
-          ANDROID_ABI: ${{ needs.validate-config.outputs.android_abi }}
+          ANDROID_ABI: ${{ matrix.channel.abi }}
           CHANNEL_ID: ${{ matrix.channel.id }}
         run: >-
           python3 scripts/kernel_builder.py stage-verified-artifact
@@ -272,15 +271,31 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         with:
-          name: verified-arm64-${{ matrix.channel.id }}
+          name: verified-${{ matrix.channel.abi }}-${{ matrix.channel.id }}
           path: verified-artifact
           if-no-files-found: error
           retention-days: 7
 
   package-release:
-    name: Compress cores and generate release JSON
+    name: Package ${{ matrix.abi }} release
     needs: [validate-config, verify-core]
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        abi: >-
+          ${{
+            fromJSON(
+              format('["{0}"]',
+                join(
+                  unique(
+                    fromJSON(needs.validate-config.outputs.matrix)[*].abi
+                  ),
+                  '","'
+                )
+              )
+            )
+          }}
     outputs:
       release_tag: ${{ steps.release.outputs.release_tag }}
     steps:
@@ -292,7 +307,7 @@ jobs:
 
       - uses: actions/download-artifact@v8
         with:
-          pattern: verified-arm64-*
+          pattern: verified-${{ matrix.abi }}-*
           path: verified-artifacts
           merge-multiple: true
 
@@ -306,19 +321,26 @@ jobs:
           GO_VERSION: ${{ needs.validate-config.outputs.go_version }}
           ANDROID_NDK_VERSION: >-
             ${{ needs.validate-config.outputs.android_ndk_version }}
-          ANDROID_ABI: ${{ needs.validate-config.outputs.android_abi }}
+          ANDROID_ABI: ${{ matrix.abi }}
           CHANNELS_JSON: >-
             ${{ needs.validate-config.outputs.matrix }}
           CUSTOM_VERSION: ${{ needs.validate-config.outputs.custom_version }}
           XZ_COMPRESSION_LEVEL: >-
             ${{ needs.validate-config.outputs.compression_level }}
         run: |
+          # Filter channels to only those that include this ABI.
+          FILTERED=$(echo "$CHANNELS_JSON" | python3 -c "
+          import json, sys
+          channels = json.load(sys.stdin)
+          abi = '${{ matrix.abi }}'
+          print(json.dumps([c for c in channels if c.get('abi') == abi]))
+          ")
           python3 scripts/kernel_builder.py package-release \
             --root verified-artifacts --output release-assets \
             --release-tag "$RELEASE_TAG" \
             --release-repository "$GITHUB_REPOSITORY" \
             --release-mode "${{ needs.validate-config.outputs.release_mode }}" \
-            --channels-json "$CHANNELS_JSON" \
+            --channels-json "$FILTERED" \
             --version-override "$CUSTOM_VERSION" \
             --builder-repository "$GITHUB_REPOSITORY" \
             --builder-workflow ".github/workflows/build-kernels.yml" \
@@ -337,15 +359,15 @@ jobs:
           if [ "$RELEASE_MODE" = custom ]; then
             cp release-assets/kernel-plugin.zip release-assets/publish-assets/
           else
-            cp release-assets/kernel-index.json release-assets/publish-assets/
-            cp release-assets/kernel-release.json release-assets/publish-assets/
-            cp release-assets/RELEASE_NOTES.md release-assets/publish-assets/
+            cp release-assets/kernel-index*.json release-assets/publish-assets/ 2>/dev/null || true
+            cp release-assets/kernel-release*.json release-assets/publish-assets/ 2>/dev/null || true
+            cp release-assets/RELEASE_NOTES.md release-assets/publish-assets/ 2>/dev/null || true
             cp release-assets/*.so.xz release-assets/publish-assets/
           fi
 
       - uses: actions/upload-artifact@v7
         with:
-          name: release-assets-arm64
+          name: release-assets-${{ matrix.abi }}
           path: release-assets
           if-no-files-found: error
           compression-level: 0
@@ -357,8 +379,9 @@ jobs:
     steps:
       - uses: actions/download-artifact@v8
         with:
-          name: release-assets-arm64
+          pattern: release-assets-*
           path: release-assets
+          merge-multiple: true
 
       - uses: >-
           softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65
@@ -372,26 +395,26 @@ jobs:
             release-assets/publish-assets/*
           fail_on_unmatched_files: true
 
-  notify-telegram:
-    name: Notify Telegram
-    needs: [validate-config, package-release, publish-release]
-    runs-on: ubuntu-latest
-    if: always() && needs.publish-release.result == 'success'
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-
-      - name: Send release notification
-        env:
-          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-          CHAT_ID: ${{ secrets.CHAT_ID }}
-          RELEASE_NAME: ${{ needs.validate-config.outputs.release_name }}
-          RELEASE_TAG: ${{ needs.package-release.outputs.release_tag }}
-          REPOSITORY: ${{ github.repository }}
-        run: >-
-          python3 scripts/kernel_builder.py notify-telegram
-          --release-name "$RELEASE_NAME" --release-tag "$RELEASE_TAG"
-          --repository "$REPOSITORY"
+#  notify-telegram:
+#    name: Notify Telegram
+#    needs: [validate-config, package-release, publish-release]
+#    runs-on: ubuntu-latest
+#    if: always() && needs.publish-release.result == 'success'
+#    steps:
+#      - uses: actions/checkout@v6
+#
+#      - uses: actions/setup-python@v6
+#        with:
+#          python-version: "3.12"
+#
+#      - name: Send release notification
+#        env:
+#          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+#          CHAT_ID: ${{ secrets.CHAT_ID }}
+#          RELEASE_NAME: ${{ needs.validate-config.outputs.release_name }}
+#          RELEASE_TAG: ${{ needs.package-release.outputs.release_tag }}
+#          REPOSITORY: ${{ github.repository }}
+#        run: >-
+#          python3 scripts/kernel_builder.py notify-telegram
+#          --release-name "$RELEASE_NAME" --release-tag "$RELEASE_TAG"
+#          --repository "$REPOSITORY"

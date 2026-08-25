@@ -10,7 +10,7 @@ import re
 import zipfile
 from pathlib import Path
 
-from .common import ABI, OFFICIAL_CHANNELS, ROOT, error, read_json, read_properties, release_version, streams_equal, write_json, write_outputs
+from .common import ALL_ABIS, DEFAULT_ABI, OFFICIAL_CHANNELS, ROOT, error, read_json, read_properties, release_version, streams_equal, write_json, write_outputs
 
 def index_cores(root: Path, abi: str) -> dict[str, Path]:
     """Index verified cores once instead of recursively scanning per channel."""
@@ -44,7 +44,7 @@ def verify_release_directory(directory: Path) -> None:
     kind = release.get("kind", "official")
     if (
         manifest.get("schemaVersion") != 3
-        or manifest.get("abi") != ABI
+        or manifest.get("abi") not in {DEFAULT_ABI, *ALL_ABIS}
         or kind not in {"official", "custom"}
     ):
         error("Unsupported kernel index schema, ABI, or release kind")
@@ -214,6 +214,14 @@ def package_release(args: argparse.Namespace) -> None:
                 "templateCommit": template_commit,
             }
         )
+    manifest_filename = (
+        "kernel-index.json" if args.abi == DEFAULT_ABI
+        else f"kernel-index-{args.abi}.json"
+    )
+    manifest_url = (
+        plugin_url if kind == "custom"
+        else f"https://github.com/{args.release_repository}/releases/download/{args.release_tag}/{manifest_filename}"
+    )
     manifest = {
         "schemaVersion": 3,
         "generatedAt": args.generated_at,
@@ -221,9 +229,7 @@ def package_release(args: argparse.Namespace) -> None:
             "kind": kind,
             "tag": args.release_tag,
             "url": f"https://github.com/{args.release_repository}/releases/tag/{args.release_tag}",
-            "manifestUrl": plugin_url
-            if kind == "custom"
-            else f"https://github.com/{args.release_repository}/releases/download/{args.release_tag}/kernel-index.json",
+            "manifestUrl": manifest_url,
             **(
                 {"plugin": {"asset": "kernel-plugin.zip", "downloadUrl": plugin_url}}
                 if kind == "custom"
@@ -251,15 +257,16 @@ def package_release(args: argparse.Namespace) -> None:
         },
         "kernels": entries,
     }
-    write_json(output / "kernel-index.json", manifest)
+    write_json(output / manifest_filename, manifest)
     release_record = {
         "schemaVersion": 1,
         "kind": kind,
         "tag": args.release_tag,
         "generatedAt": args.generated_at,
+        "abi": args.abi,
         "kernelCount": len(entries),
         "assets": [entry["asset"] for entry in entries],
-        "manifest": "kernel-index.json",
+        "manifest": manifest_filename,
     }
     write_json(output / "kernel-release.json", release_record)
     (output / "RELEASE_NOTES.md").write_text(
@@ -270,11 +277,10 @@ def package_release(args: argparse.Namespace) -> None:
         with zipfile.ZipFile(
             output / "kernel-plugin.zip", "w", compression=zipfile.ZIP_STORED
         ) as archive:
-            archive.write(output / "kernel-index.json", "kernel-index.json")
+            archive.write(output / manifest_filename, "kernel-index.json")
             for entry in entries:
                 archive.write(output / entry["asset"], entry["asset"])
     verify_release_directory(output)
     if args.github_output:
         write_outputs(Path(args.github_output), {"release_tag": args.release_tag})
     print(f"Packaged {len(entries)} kernel assets in {output}")
-

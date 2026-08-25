@@ -9,7 +9,7 @@ import shutil
 import struct
 from pathlib import Path
 
-from .common import ABI, HEX_COMMIT, authenticated_url, command, error, read_json, write_json
+from .common import ALL_ABIS, HEX_COMMIT, authenticated_url, command, error, read_json, write_json
 
 def detect_upstream(args: argparse.Namespace) -> None:
     rows = command(
@@ -154,12 +154,25 @@ def stage_verified_artifact(args: argparse.Namespace) -> None:
         error(f"Expected one core for {args.channel}, found {len(candidates)}")
     copy_artifact(argparse.Namespace(source=str(candidates[0]), target=args.target))
 
-def valid_arm64_core(path: Path) -> bool:
+ABI_ELF_MACHINE = {
+    "armeabi-v7a": (1, 40),   # ELFCLASS32, EM_ARM
+    "arm64-v8a": (2, 183),    # ELFCLASS64, EM_AARCH64
+    "x86": (1, 3),            # ELFCLASS32, EM_386
+    "x86_64": (2, 62),        # ELFCLASS64, EM_X86_64
+}
+
+def valid_core(path: Path, abi: str) -> bool:
+    expected_class, expected_machine = ABI_ELF_MACHINE.get(abi, (0, 0))
+    if not expected_class:
+        return False
     data = path.read_bytes()
-    if len(data) < 64 or data[:6] != b"\x7fELF\x02\x01":
+    if len(data) < 64 or data[:6] != b"\x7fELF":
+        return False
+    elf_class = data[4]
+    if elf_class != expected_class:
         return False
     file_type, machine = struct.unpack_from("<HH", data, 16)
-    if file_type != 3 or machine != 183:
+    if file_type != 3 or machine != expected_machine:
         return False
     section_offset = struct.unpack_from("<Q", data, 40)[0]
     section_size, section_count = struct.unpack_from("<HH", data, 58)
@@ -196,8 +209,8 @@ def verify_core(args: argparse.Namespace) -> None:
     if len(cores) != 1:
         error(f"Expected one core under {root}, found {len(cores)}")
     core = cores[0]
-    if args.abi != ABI or not valid_arm64_core(core):
-        error(f"Invalid Android ARM64 core: {core}")
+    if args.abi not in ALL_ABIS or not valid_core(core, args.abi):
+        error(f"Invalid Android core for {args.abi}: {core}")
     source_files = list(root.rglob("source.json"))
     if len(source_files) != 1:
         error(f"Expected one source.json under {root}, found {len(source_files)}")
@@ -206,5 +219,3 @@ def verify_core(args: argparse.Namespace) -> None:
         if not re.fullmatch(r"[0-9a-f]{40}", source.get(key, "")):
             error(f"Invalid {key} in {source_files[0]}")
     print(f"Verified {core} ({args.abi})")
-
-
