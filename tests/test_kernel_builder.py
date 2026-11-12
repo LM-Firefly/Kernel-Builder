@@ -13,6 +13,7 @@ from pathlib import Path
 
 from scripts.kernel_builder import compress_core, fetch_source, release_version
 from scripts.builder.config import validate_config
+from scripts.builder.source import apply_patches
 
 
 class KernelBuilderTests(unittest.TestCase):
@@ -106,6 +107,49 @@ class KernelBuilderTests(unittest.TestCase):
             stderr=subprocess.PIPE,
         )
         return result.stdout.strip()
+
+
+class ApplyPatchesTests(unittest.TestCase):
+    def test_channel_set_fully_replaces_base(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp, "source")
+            target = Path(tmp, "target")
+            source.mkdir()
+            target.mkdir()
+            source.joinpath("0002-statistic-manager-callbacks.patch").write_text(
+                "new\n", encoding="utf-8"
+            )
+            target.joinpath("0001-tun-android-uid-rules.patch").write_text(
+                "stale\n", encoding="utf-8"
+            )
+            target.joinpath("0002-statistic-manager-callbacks.patch").write_text(
+                "stale\n", encoding="utf-8"
+            )
+            apply_patches(argparse.Namespace(source=str(source), target=str(target)))
+            self.assertEqual(
+                sorted(p.name for p in target.glob("*.patch")),
+                ["0002-statistic-manager-callbacks.patch"],
+            )
+            self.assertEqual(
+                target.joinpath("0002-statistic-manager-callbacks.patch").read_text(
+                    encoding="utf-8"
+                ),
+                "new\n",
+            )
+
+    def test_variant_subdirectory_survives_replace(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp, "source")
+            target = Path(tmp, "target", "smart")
+            source.mkdir()
+            target.mkdir(parents=True)
+            source.joinpath("0001-a.patch").write_text("a\n", encoding="utf-8")
+            target.joinpath("0002-b.patch").write_text("b\n", encoding="utf-8")
+            apply_patches(
+                argparse.Namespace(source=str(source), target=str(target.parent))
+            )
+            self.assertTrue(target.joinpath("0002-b.patch").exists())
+            self.assertTrue(target.parent.joinpath("0001-a.patch").exists())
 
 
 if __name__ == "__main__":
